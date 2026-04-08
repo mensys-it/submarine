@@ -1,0 +1,17 @@
+[package]
+name = "submarine-net"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ipnet.workspace = true
+thiserror = "2"
+tokio = { version = "1", features = ["process", "fs", "io-util", "time", "rt"] }
+tracing = "0.1.44"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+futures = "0.3"
+libc = "0.2"
+rtnetlink = "0.23"
