@@ -1,0 +1,17 @@
+[package]
+name = "submarine-ipc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+interprocess = { version = "2.4", features = ["tokio"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = "1"
+submarine-config = { version = "0.1.0", path = "../submarine-config" }
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "sync", "rt", "macros"] }
+
+[target."cfg(windows)".dependencies]
+widestring = "1"
