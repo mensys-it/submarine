@@ -1,0 +1,69 @@
+;
+; submarine-split-tunnel.inf
+; installation of the split tunnel kernel driver as a WFP callout driver
+;
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=WFPCALLOUTS
+ClassGuid={57465043-616C-6C6F-7574-5F636C617373}
+Provider=%ManufacturerName%
+CatalogFile=submarine-split-tunnel.cat
+PnpLockdown=1
+DriverVer=
+
+[DestinationDirs]
+DefaultDestDir = 12
+
+; Device Class
+; custom class registered at install time (WFP callouts have no built-in class)
+
+[ClassInstall32]
+AddReg=SplitTunnelClassReg
+
+[SplitTunnelClassReg]
+HKR,,,0,%ClassName%
+HKR,,Icon,,-5
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+submarine-split-tunnel.sys  = 1,,
+
+; Install Section
+; root-enumerated device: it is created by the installer, not by Plug and Play
+
+[Manufacturer]
+%ManufacturerName%=Standard,NT$ARCH$.10.0
+
+[Standard.NT$ARCH$.10.0]
+%submarine-split-tunnel.DeviceDesc%=submarine-split-tunnel_Device, Root\submarine-split-tunnel
+
+[submarine-split-tunnel_Device.NT]
+CopyFiles=Drivers_Dir
+
+[Drivers_Dir]
+submarine-split-tunnel.sys
+
+; Service Installation
+[submarine-split-tunnel_Device.NT.Services]
+AddService = submarine-split-tunnel,%SPSVCINST_ASSOCSERVICE%, submarine-split-tunnel_Service_Inst
+
+; kernel driver service, started on demand by the Submarine service
+[submarine-split-tunnel_Service_Inst]
+DisplayName    = %submarine-split-tunnel.SVCDESC%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\submarine-split-tunnel.sys
+
+; Strings
+; NB: names and GUIDs differ from upstream so the driver can coexist with Mullvad VPN
+[Strings]
+SPSVCINST_ASSOCSERVICE= 0x00000002
+ManufacturerName="Mensys"
+ClassName="Submarine Split Tunnel"
+DiskName = "Submarine Split Tunnel Installation Disk"
+submarine-split-tunnel.DeviceDesc = "Submarine Split Tunnel Device"
+submarine-split-tunnel.SVCDESC = "Submarine Split Tunnel Service"
