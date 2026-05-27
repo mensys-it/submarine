@@ -1,5 +1,5 @@
 //! Fallback backend for the platforms without a real implementation (anything but
-//! Linux). It exposes the same types as the real backends so the
+//! Linux and Windows). It exposes the same types as the real backends so the
 //! daemon compiles everywhere: operations that would leave the system unprotected or
 //! misconfigured fail with [`NetError::Unsupported`], while resets are no-ops.
 
