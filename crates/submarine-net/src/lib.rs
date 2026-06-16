@@ -1,7 +1,7 @@
 //! OS integration for a running tunnel: routes, DNS, kill switch firewall and
 //! per-app split tunneling.
 //!
-//! Every platform module (Linux, Windows, plus a fallback for the others)
+//! Every platform module (Linux, Windows, macOS, plus a fallback for the others)
 //! exposes the same types (`RouteManager`, `DnsManager`, `Firewall`, `SplitTunnel`
 //! and the `FWMARK` / `ROUTING_TABLE` constants), so the daemon drives them
 //! without any platform-specific code of its own.
@@ -24,14 +24,25 @@ pub use windows::{
     DnsManager, FWMARK, Firewall, ROUTING_TABLE, RouteManager, SplitTunnel, remove_split_driver,
 };
 
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::{DnsManager, FWMARK, Firewall, ROUTING_TABLE, RouteManager, SplitTunnel};
+
+// platform-neutral parsing and pf ruleset of the macOS backend, also compiled in tests
+// so that they are unit tested on every platform
+#[cfg(any(target_os = "macos", test))]
+mod macos_text;
+#[cfg(any(target_os = "macos", test))]
+mod pf;
 // NB: outside Windows only its tests run, hence the dead_code allowance
 #[cfg(any(windows, test))]
 #[cfg_attr(not(windows), allow(dead_code))]
 mod split_driver;
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 mod unsupported;
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 pub use unsupported::{DnsManager, FWMARK, Firewall, ROUTING_TABLE, RouteManager, SplitTunnel};
 
 /// Errors raised while configuring the OS networking.
