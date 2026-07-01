@@ -1,0 +1,25 @@
+[package]
+name = "submarine-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+interprocess = { version = "2.4", features = ["tokio"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = "1"
+submarine-config = { version = "0.1.0", path = "../submarine-config" }
+submarine-ipc = { version = "0.1.0", path = "../submarine-ipc" }
+submarine-net = { version = "0.1.0", path = "../submarine-net" }
+submarine-tunnel = { version = "0.1.0", path = "../submarine-tunnel" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "fs"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+
+[target."cfg(unix)".dependencies]
+libc = "0.2"
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization"] }
