@@ -7,6 +7,7 @@
 //! Usage:
 //!   submarine-daemon [--socket <path>] [--data-dir <path>]   run in the foreground
 //!   submarine-daemon reset-firewall                          remove kill switch rules
+//!   submarine-daemon service install|uninstall|run           Windows service (Windows only)
 //!
 //! `--socket` and `--data-dir` can also be set with SUBMARINE_SOCKET and
 //! SUBMARINE_DATA_DIR.
@@ -15,6 +16,8 @@ mod logbuf;
 mod server;
 mod service;
 mod store;
+#[cfg(windows)]
+mod winsvc;
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -144,12 +147,17 @@ fn main() -> ExitCode {
             init_logging(None);
             runtime().block_on(reset_firewall())
         }
+        // Windows service management, handled entirely by `winsvc`
+        #[cfg(windows)]
+        Some("service") => return winsvc::command(args.get(2).map(String::as_str), &args),
         // usage
         Some("-h" | "--help") => {
             eprintln!(
                 "usage: {0} [--socket <path>] [--data-dir <path>]\n       {0} reset-firewall",
                 args[0]
             );
+            #[cfg(windows)]
+            eprintln!("       {} service install|uninstall|run", args[0]);
             return ExitCode::SUCCESS;
         }
         // default: daemon in the foreground until SIGTERM / Ctrl+C
