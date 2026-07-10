@@ -8,13 +8,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use interprocess::local_socket::tokio::{RecvHalf, SendHalf, prelude::*};
 use tokio::io::BufReader;
 use tokio::sync::{Mutex, broadcast, oneshot};
+use tokio::task::JoinHandle;
 
 use crate::transport::{connect, read_message, write_message};
 use crate::{ClientMessage, Event, Request, Response, ServerMessage};
 
-/// Requests waiting for a response, by id; shared with the read loop.
+/// Requests waiting for a response, by id; shared with the read loop, which sets it to
+/// `None` when the connection is gone so that later requests fail instead of waiting forever.
 /// NB: a std mutex is enough since it is never held across an `await`.
-type Pending = Arc<std::sync::Mutex<HashMap<u64, oneshot::Sender<Result<Response, String>>>>>;
+type Pending =
+    Arc<std::sync::Mutex<Option<HashMap<u64, oneshot::Sender<Result<Response, String>>>>>>;
 
 /// Errors returned by [`Client`].
 #[derive(Debug, thiserror::Error)]
@@ -39,6 +42,8 @@ pub struct Client {
     next_id: AtomicU64,
     /// Template receiver; the only sender lives in the read loop.
     events: broadcast::Receiver<Event>,
+    /// Background task reading from the socket, stopped when the client is dropped.
+    read_task: JoinHandle<()>,
 }
 
 impl Client {
@@ -46,15 +51,16 @@ impl Client {
     /// background task that dispatches responses and events.
     pub async fn connect(path: &str) -> Result<Self, ClientError> {
         let (reader, writer) = connect(path).await?.split();
-        let pending: Pending = Default::default();
+        let pending: Pending = Arc::new(std::sync::Mutex::new(Some(HashMap::new())));
         // subscribers that fall more than 64 events behind miss the oldest ones
         let (sender, events) = broadcast::channel(64);
-        tokio::spawn(read_loop(reader, pending.clone(), sender));
+        let read_task = tokio::spawn(read_loop(reader, pending.clone(), sender));
         Ok(Self {
             writer: Mutex::new(writer),
             pending,
             next_id: AtomicU64::new(1),
             events,
+            read_task,
         })
     }
 
@@ -65,15 +71,21 @@ impl Client {
     /// the connection drops before the response, [`ClientError::Remote`] if the daemon
     /// reports an error.
     pub async fn request(&self, request: Request) -> Result<Response, ClientError> {
-        // the response channel is registered before writing, so a fast answer is not lost
+        // the response channel is registered before writing, so a fast answer is not lost;
+        // once the read loop has ended no answer can come, so the request fails right away
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id, tx);
+        match self.pending.lock().unwrap().as_mut() {
+            Some(pending) => pending.insert(id, tx),
+            None => return Err(ClientError::Disconnected),
+        };
 
         let message = ClientMessage { id, request };
         // on a write failure no response will come: the pending entry is removed
         if let Err(err) = write_message(&mut *self.writer.lock().await, &message).await {
-            self.pending.lock().unwrap().remove(&id);
+            if let Some(pending) = self.pending.lock().unwrap().as_mut() {
+                pending.remove(&id);
+            }
             return Err(err.into());
         }
         match rx.await {
@@ -88,6 +100,14 @@ impl Client {
     }
 }
 
+impl Drop for Client {
+    /// Stops the read loop, which would otherwise keep the connection open until the daemon
+    /// closes it.
+    fn drop(&mut self) {
+        self.read_task.abort();
+    }
+}
+
 /// Dispatches incoming messages until the connection closes or a malformed message
 /// arrives: responses go to the matching pending request, events to the subscribers.
 async fn read_loop(reader: RecvHalf, pending: Pending, events: broadcast::Sender<Event>) {
@@ -97,7 +117,8 @@ async fn read_loop(reader: RecvHalf, pending: Pending, events: broadcast::Sender
         match read_message::<ServerMessage, _>(&mut reader, &mut buf).await {
             Ok(Some(ServerMessage::Response { id, result })) => {
                 // responses to requests no longer waiting are discarded
-                if let Some(tx) = pending.lock().unwrap().remove(&id) {
+                let tx = pending.lock().unwrap().as_mut().and_then(|p| p.remove(&id));
+                if let Some(tx) = tx {
                     let _ = tx.send(result);
                 }
             }
@@ -108,7 +129,7 @@ async fn read_loop(reader: RecvHalf, pending: Pending, events: broadcast::Sender
             Ok(None) | Err(_) => break,
         }
     }
-    // dropping the senders fails every in-flight request with `Disconnected`,
-    // and dropping `events` ends the subscribers' streams
-    pending.lock().unwrap().clear();
+    // dropping the senders fails every in-flight request with `Disconnected`, the `None`
+    // marker fails the later ones, and dropping `events` ends the subscribers' streams
+    pending.lock().unwrap().take();
 }
