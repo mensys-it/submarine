@@ -133,19 +133,31 @@ impl Service {
             events: broadcast::channel(64).0,
         });
 
-        // the tunnel left connected wins over the auto-connect one, which is used
-        // only if it still exists; the connection runs in the background so the
-        // daemon starts serving clients right away
+        // the tunnel left connected wins over the auto-connect one; both are used
+        // only if they still exist, and a stale connected tunnel is forgotten
         let restore = service.store.connected_tunnel();
+        let restore = restore.filter(|id| service.store.get(id).is_ok());
+        if restore.is_none() {
+            let _ = service.store.save_connected_tunnel(None);
+        }
         let auto = service.inner.lock().await.settings.auto_connect.clone();
         let auto = auto.filter(|id| service.store.get(id).is_ok());
         match restore.or(auto) {
+            // the connection runs in the background so the daemon starts serving
+            // clients right away
             Some(id) => {
                 tracing::info!(%id, "connecting at startup");
                 let service = service.clone();
                 tokio::spawn(async move {
                     if let Err(err) = service.connect(&id).await {
                         tracing::error!("reconnect failed: {err}");
+                        // a failure before the attempt started (e.g. the tunnel became
+                        // unreadable) never reaches `sync_protection`: the firewall would
+                        // stay as the previous instance left it, so it is applied here
+                        let mut inner = service.inner.lock().await;
+                        if inner.status.state == ConnectionState::Disconnected {
+                            service.sync_protection(&mut inner).await;
+                        }
                     }
                 });
             }
@@ -254,13 +266,18 @@ impl Service {
     /// Deletes a tunnel, refused while it is in use. It is also removed from
     /// the auto-connect setting.
     async fn delete(&self, id: &str) -> Result<Response> {
-        if self.inner.lock().await.status.tunnel_id.as_deref() == Some(id) {
-            return Err("disconnect before deleting this tunnel".into());
-        }
-        self.store.delete(id).map_err(err)?;
-        let auto = self.inner.lock().await.settings.auto_connect.clone();
-        if auto.as_deref() == Some(id) {
-            let mut settings = self.inner.lock().await.settings.clone();
+        // check and removal under a single lock, so the tunnel cannot be connected in
+        // between; the settings to update are read in the same critical section
+        let settings = {
+            let inner = self.inner.lock().await;
+            if inner.status.tunnel_id.as_deref() == Some(id) {
+                return Err("disconnect before deleting this tunnel".into());
+            }
+            self.store.delete(id).map_err(err)?;
+            (inner.settings.auto_connect.as_deref() == Some(id)).then(|| inner.settings.clone())
+        };
+        // removal from the auto-connect setting
+        if let Some(mut settings) = settings {
             settings.auto_connect = None;
             self.set_settings(settings).await?;
         }
@@ -555,6 +572,12 @@ impl Service {
         // DNS leaks are blocked when every app uses a tunnel with a default route
         // and its own DNS servers
         let split = split_mode(&inner.settings);
+        let split_apps: Vec<PathBuf> = inner
+            .settings
+            .split_apps
+            .iter()
+            .map(|a| PathBuf::from(&a.path))
+            .collect();
         let policy = FirewallPolicy {
             block,
             allow_lan: inner.settings.allow_lan,
@@ -573,12 +596,7 @@ impl Service {
                 .as_ref()
                 .map(|a| a.net.dns_servers.clone())
                 .unwrap_or_default(),
-            split_apps: inner
-                .settings
-                .split_apps
-                .iter()
-                .map(|a| PathBuf::from(&a.path))
-                .collect(),
+            split_apps: split_apps.clone(),
         };
 
         let mut problems = Vec::new();
@@ -591,14 +609,8 @@ impl Service {
         let split_result = if split == SplitMode::Off {
             inner.split.stop().await
         } else {
-            let apps: Vec<PathBuf> = inner
-                .settings
-                .split_apps
-                .iter()
-                .map(|a| PathBuf::from(&a.path))
-                .collect();
             let tunnel = inner.active.as_ref().map(|a| a.net.clone());
-            inner.split.start(split, &apps, tunnel.as_ref()).await
+            inner.split.start(split, &split_apps, tunnel.as_ref()).await
         };
         if let Err(e) = split_result {
             tracing::error!("split tunnel: {e}");
