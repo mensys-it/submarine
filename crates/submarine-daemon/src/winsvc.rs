@@ -109,14 +109,24 @@ fn uninstall() -> windows_service::Result<()> {
         ServiceAccess::QUERY_STATUS | ServiceAccess::STOP | ServiceAccess::DELETE,
     )?;
     // stop request, waiting up to 10 seconds for the service to stop
-    if service.query_status()?.current_state != ServiceState::Stopped {
+    let mut stopped = service.query_status()?.current_state == ServiceState::Stopped;
+    if !stopped {
         let _ = service.stop();
         for _ in 0..50 {
             if service.query_status()?.current_state == ServiceState::Stopped {
+                stopped = true;
                 break;
             }
             std::thread::sleep(Duration::from_millis(200));
         }
+    }
+    // NB: a service still running is only marked for deletion by Windows, and it may
+    // still change the firewall after the reset below: the user is warned
+    if !stopped {
+        eprintln!(
+            "warning: service {SERVICE_NAME} did not stop within 10 seconds, it will be \
+             removed when it stops (or at the next reboot)"
+        );
     }
     // removal of the service and of the split tunnel driver
     service.delete()?;
