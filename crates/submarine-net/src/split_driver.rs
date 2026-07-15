@@ -212,6 +212,8 @@ mod tests {
     fn ioctl_codes_match_ctl_code_macro() {
         // CTL_CODE(0x8000, 1, METHOD_BUFFERED, FILE_ANY_ACCESS)
         assert_eq!(IOCTL_INITIALIZE, 0x8000_0004);
+        assert_eq!(IOCTL_REGISTER_PROCESSES, 0x8000_000C);
+        assert_eq!(IOCTL_REGISTER_IP_ADDRESSES, 0x8000_0010);
         assert_eq!(IOCTL_SET_CONFIGURATION, 0x8000_0018);
         assert_eq!(IOCTL_CLEAR_CONFIGURATION, 0x8000_0023);
         assert_eq!(IOCTL_GET_STATE, 0x8000_0024);

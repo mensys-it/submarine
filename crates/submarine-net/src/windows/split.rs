@@ -113,7 +113,18 @@ impl SplitTunnel {
         let device = self.device()?;
         device.ioctl(IOCTL_REGISTER_IP_ADDRESSES, &ips.encode())?;
         device.ioctl(IOCTL_SET_CONFIGURATION, &encode_configuration(&paths))?;
-        tracing::info!(?mode, apps = paths.len(), state = ?device.state()?, "split tunnel configured");
+        // the driver state is only logged: failing to read it must NOT undo a configuration
+        // that succeeded, or `active` would not be recorded and never cleaned up
+        match device.state() {
+            Ok(state) => {
+                tracing::info!(?mode, apps = paths.len(), ?state, "split tunnel configured")
+            }
+            Err(err) => tracing::warn!(
+                ?mode,
+                apps = paths.len(),
+                "split tunnel configured, state unknown: {err}"
+            ),
+        }
         self.active = Some(Active {
             mode,
             tunnel: tunnel.clone(),

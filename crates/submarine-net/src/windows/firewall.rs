@@ -144,14 +144,34 @@ fn apply_blocking(p: &FirewallPolicy) -> Result<()> {
         let tunnel_luid = tunnel_luid.map(|luid| unsafe { luid.Value });
 
         // DNS leak protection: outbound DNS only through the tunnel (or loopback)
-        if p.block_dns_leaks && let Some(luid) = tunnel_luid {
-            for layer in [FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6] {
+        if p.block_dns_leaks
+            && let Some(luid) = tunnel_luid
+        {
+            for layer in [
+                FWPM_LAYER_ALE_AUTH_CONNECT_V4,
+                FWPM_LAYER_ALE_AUTH_CONNECT_V6,
+            ] {
                 let add = |name, weight, action, conds: &[Cond]| {
                     engine.add_filter(&layer, name, weight, action, conds)
                 };
-                add("Submarine: loopback", WEIGHT_PERMIT_TUNNEL, FWP_ACTION_PERMIT, &[Cond::Loopback])?;
-                add("Submarine: tunnel", WEIGHT_PERMIT_TUNNEL, FWP_ACTION_PERMIT, &[Cond::LocalInterface(luid)])?;
-                add("Submarine: DNS outside the tunnel", WEIGHT_BLOCK_DNS, FWP_ACTION_BLOCK, &[Cond::RemotePort(53)])?;
+                add(
+                    "Submarine: loopback",
+                    WEIGHT_PERMIT_TUNNEL,
+                    FWP_ACTION_PERMIT,
+                    &[Cond::Loopback],
+                )?;
+                add(
+                    "Submarine: tunnel",
+                    WEIGHT_PERMIT_TUNNEL,
+                    FWP_ACTION_PERMIT,
+                    &[Cond::LocalInterface(luid)],
+                )?;
+                add(
+                    "Submarine: DNS outside the tunnel",
+                    WEIGHT_BLOCK_DNS,
+                    FWP_ACTION_BLOCK,
+                    &[Cond::RemotePort(53)],
+                )?;
             }
         }
         // nothing else without the kill switch
@@ -164,7 +184,10 @@ fn apply_blocking(p: &FirewallPolicy) -> Result<()> {
             if tunnel_luid.is_none() {
                 block_apps(engine, p)?;
             }
-            tracing::info!(apps = p.split_apps.len(), "firewall applied (chosen apps only)");
+            tracing::info!(
+                apps = p.split_apps.len(),
+                "firewall applied (chosen apps only)"
+            );
             return Ok(());
         }
 
@@ -223,7 +246,12 @@ fn apply_blocking(p: &FirewallPolicy) -> Result<()> {
                 &[],
             )?;
         }
-        tracing::info!(allow_lan = p.allow_lan, tunnel = ?p.tunnel_index, dns_leaks = p.block_dns_leaks, "firewall applied");
+        tracing::info!(
+            allow_lan = p.allow_lan,
+            tunnel = ?p.tunnel_index,
+            dns_leaks = p.block_dns_leaks,
+            "firewall applied"
+        );
         Ok(())
     })
 }
@@ -249,13 +277,13 @@ fn block_apps(engine: &Engine, p: &FirewallPolicy) -> Result<()> {
         };
         for (layer, v6) in layers {
             let app_cond = Cond::AppId(app.0);
-            // loopback, permitted for every app (not only this one)
+            // loopback for this app, above its block (the other apps are not blocked)
             engine.add_filter(
                 &layer,
-                "Submarine: loopback",
+                "Submarine: app loopback",
                 WEIGHT_PERMIT_TUNNEL,
                 FWP_ACTION_PERMIT,
-                &[Cond::Loopback],
+                &[Cond::AppId(app.0), Cond::Loopback],
             )?;
             // LAN for this app, above its block
             if p.allow_lan {
