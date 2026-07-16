@@ -211,6 +211,7 @@ fn scan(apps: &HashSet<PathBuf>, group: &Path) {
         let Ok(exe) = std::fs::read_link(entry.path().join("exe")) else {
             continue;
         };
+        let exe = running_exe(exe);
         if !apps.contains(&exe) || in_group(pid) {
             continue;
         }
@@ -238,9 +239,34 @@ fn is_our_group(line: &str) -> bool {
         && path == Some(&format!("/{GROUP}"))
 }
 
+/// Path of the executable of a running process, as read from `/proc/<pid>/exe`.
+///
+/// NB: when the file on disk was replaced or removed while the process runs (e.g. an
+/// app updated in place) the kernel appends " (deleted)" to the link: the suffix is
+/// removed, so the process still matches the path chosen by the user.
+fn running_exe(link: PathBuf) -> PathBuf {
+    match link.to_str().and_then(|s| s.strip_suffix(" (deleted)")) {
+        Some(path) => PathBuf::from(path),
+        None => link,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // a replaced executable still matches its path; other links are left untouched
+    #[test]
+    fn strips_deleted_suffix_from_exe_links() {
+        assert_eq!(
+            running_exe(PathBuf::from("/usr/lib/firefox/firefox (deleted)")),
+            PathBuf::from("/usr/lib/firefox/firefox")
+        );
+        assert_eq!(
+            running_exe(PathBuf::from("/usr/bin/curl")),
+            PathBuf::from("/usr/bin/curl")
+        );
+    }
 
     // only net_cls lines with our group path count, whatever the other controllers
     #[test]
