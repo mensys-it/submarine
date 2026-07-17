@@ -1,7 +1,7 @@
 <p align="center">🇬🇧 <a href="README.md">English</a> | 🇮🇹 <strong>Italiano</strong></p>
 
 <p align="center">
-  <img src="apps/desktop/public/icon.png" alt="Submarine" width="160">
+  <img src=".github/assets/icon.png" alt="Submarine" width="160">
 </p>
 
 <h1 align="center">Submarine</h1>
