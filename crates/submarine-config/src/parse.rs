@@ -184,7 +184,7 @@ fn parse_interface_key(
         "privatekey" => {
             iface.private_key = Some(match previous {
                 Some(previous) if value == HIDDEN => previous.interface.private_key.clone(),
-                _ => parse_key(line, key, value)?,
+                _ => parse_value(line, key, value)?,
             })
         }
         "address" => {
@@ -201,8 +201,8 @@ fn parse_interface_key(
                 }
             }
         }
-        "mtu" => iface.mtu = Some(parse_num(line, key, value)?),
-        "listenport" => iface.listen_port = Some(parse_num(line, key, value)?),
+        "mtu" => iface.mtu = Some(parse_value(line, key, value)?),
+        "listenport" => iface.listen_port = Some(parse_value(line, key, value)?),
         // hook scripts are NEVER run: the daemon has elevated privileges
         "preup" | "postup" | "predown" | "postdown" => warnings.push(warn(
             line,
@@ -231,11 +231,11 @@ fn parse_peer_key(
     warnings: &mut Vec<Warning>,
 ) -> Result<(), ConfigError> {
     match key.to_ascii_lowercase().as_str() {
-        "publickey" => peer.public_key = Some(parse_key(line, key, value)?),
+        "publickey" => peer.public_key = Some(parse_value(line, key, value)?),
         // a hidden preshared key is only recorded here: it is resolved in `build`, once the
         // public key (which may come later in the section) is known
         "presharedkey" if value == HIDDEN => peer.hidden_preshared_key = Some(line),
-        "presharedkey" => peer.preshared_key = Some(parse_key(line, key, value)?),
+        "presharedkey" => peer.preshared_key = Some(parse_value(line, key, value)?),
         "allowedips" => {
             for item in list(value) {
                 peer.allowed_ips.push(parse_ip_net(line, key, item)?);
@@ -247,7 +247,7 @@ fn parse_peer_key(
             peer.persistent_keepalive = if value.eq_ignore_ascii_case("off") {
                 None
             } else {
-                match parse_num(line, key, value)? {
+                match parse_value(line, key, value)? {
                     0 => None,
                     n => Some(n),
                 }
@@ -317,13 +317,13 @@ fn list(value: &str) -> impl Iterator<Item = &str> {
     value.split(',').map(str::trim).filter(|s| !s.is_empty())
 }
 
-/// Parses a base64 key, reporting failures as an invalid value of `key` at `line`.
-fn parse_key<K: std::str::FromStr>(line: usize, key: &str, value: &str) -> Result<K, ConfigError> {
-    value.parse().map_err(|_| invalid(line, key, value))
-}
-
-/// Parses a numeric value, reporting failures as an invalid value of `key` at `line`.
-fn parse_num<N: std::str::FromStr>(line: usize, key: &str, value: &str) -> Result<N, ConfigError> {
+/// Parses a value with its `FromStr` implementation (base64 keys, numbers), reporting
+/// failures as an invalid value of `key` at `line`.
+fn parse_value<T: std::str::FromStr>(
+    line: usize,
+    key: &str,
+    value: &str,
+) -> Result<T, ConfigError> {
     value.parse().map_err(|_| invalid(line, key, value))
 }
 
