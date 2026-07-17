@@ -260,4 +260,4 @@ MPL-2.0 like its upstream.
 
 ---
 
-<p align="center">Made with ❤️ by Mensys</p>
+<p align="center">Made with ❤️ by <a href="https://www.mensys.it/en/">Mensys</a></p>

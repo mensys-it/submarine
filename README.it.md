@@ -260,4 +260,4 @@ MPL-2.0 come il suo upstream.
 
 ---
 
-<p align="center">Sviluppato con ❤️ da Mensys</p>
+<p align="center">Sviluppato con ❤️ da <a href="https://www.mensys.it/it/">Mensys</a></p>
