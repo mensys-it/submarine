@@ -1134,6 +1134,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "submarine-cli"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "submarine-config",
+ "submarine-ipc",
+ "submarine-net",
+ "submarine-tunnel",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "submarine-config"
 version = "0.1.0"
 dependencies = [
