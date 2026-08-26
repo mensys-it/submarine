@@ -1,0 +1,39 @@
+[package]
+name = "submarine-desktop"
+description = "Submarine VPN desktop app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# library holding the whole app, as the Tauri template expects
+[lib]
+# NB: NOT `submarine_desktop`, which would clash with the binary name on Windows
+name = "submarine_desktop_lib"
+# static and dynamic libraries for the mobile targets, rlib for the desktop binary
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# build script dependencies
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+# runtime dependencies
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+submarine-ipc = { path = "../../../crates/submarine-ipc" }
+# system language, for the language preference `system`
+sys-locale = "0.3"
+# tray icon, with PNG icons embedded in the binary
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
+tokio = { version = "1", features = ["sync", "time"] }
+tracing = "0.1"
+
+# Windows only: registry access, to list the installed applications
+[target."cfg(windows)".dependencies]
+winreg = "0.55"

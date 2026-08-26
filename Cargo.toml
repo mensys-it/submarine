@@ -1,7 +1,10 @@
 [workspace]
 resolver = "3"
-# crates of the service and its libraries
-members = ["crates/*"]
+# crates of the service and its libraries, plus the backend of the desktop app
+members = ["crates/*", "apps/desktop/src-tauri"]
+# the desktop app is NOT built by default because on Linux it needs WebKitGTK:
+# build it explicitly with `-p submarine-desktop`
+default-members = ["crates/*"]
 
 # metadata shared by every crate of the workspace
 [workspace.package]

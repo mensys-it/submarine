@@ -1,0 +1,101 @@
+/* Design tokens of the desktop app: colours, ocean scene gradients, type, radii,
+   spacing, easings and shadows, used through var() by app.css and the components.
+   NB: there is a single, dark theme, because the night ocean scene is the identity of
+   the app; no light variant is defined. */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces, Deepest to Most Raised */
+  --bg-body: #070d18;
+  --bg-app: #0a1220;
+  --bg-sidebar: #0c1626;
+  --bg-sunken: #08101c;
+  --bg-dropzone: #0b1524;
+  --bg-pill: #0a1322;
+  --surface: #0f1a2b;
+  --surface-raised: #13243a;
+  --surface-active: #14223a;
+  --surface-selected: #12243a;
+
+  /* Lines */
+  --line-sidebar: #18263b;
+  --line: #1b2a41;
+  --line-hover: #2a3d5a;
+  --line-active: #23344f;
+  --line-strong: #22344f;
+  --line-dashed: #2b3f5c;
+  --line-log: #111c2d;
+  --line-pill: #16233a;
+
+  /* Text */
+  --text: #e6eef7;
+  --text-strong: #f3f8fc;
+  --text-soft: #c6d6e6;
+  --text-secondary: #a9bbcf;
+  --text-muted: #8ca0b8;
+  --text-faint: #7e93ad;
+  --text-import: #cfe0f0;
+
+  /* Accent and States */
+  --accent: #3dd6c4;
+  --accent-soft: #7fe7da;
+  --accent-ink: #04201d;
+  --accent-tint: rgba(61, 214, 196, 0.14);
+  --accent-glow: rgba(61, 214, 196, 0.25);
+  --amber: #f5b54a;
+  --amber-text: #f5c87a;
+  --amber-ink: #f5e3c2;
+  --red: #ff7a6b;
+  --red-text: #ff9b8e;
+  --red-strong: #ffd3cc;
+  --blue: #9db8ff;
+  --gold: #f4b740;
+  --idle: #4b5b72;
+  --track-off: #22324a;
+  --ring-off: #3a4d68;
+
+  /* Ocean Scene */
+  --sky: linear-gradient(180deg, #0b1a2e 0%, #0c1f36 60%, #0b2440 100%);
+  --sea-wave-1: #17507a;
+  --sea-wave-2: #11466c;
+  --sea-wave-3: #1a6a98;
+  --sea-body: linear-gradient(180deg, #0f4167 0%, #0a2a47 45%, #071a2e 100%);
+  --sea-tint: linear-gradient(180deg, rgba(14, 74, 110, 0.45), rgba(7, 26, 46, 0.75));
+  --sub-hull: #f4b740;
+
+  /* Type */
+  --font-display: "Bricolage Grotesque Variable", "IBM Plex Sans", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Radius */
+  --radius-xs: 6px;
+  --radius-sm: 12px;
+  --radius-md: 14px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 22px;
+  --radius-3xl: 28px;
+  --radius-pill: 999px;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 36px;
+  --space-9: 40px;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.3, 1.5, 0.5, 1);
+  --ease-dive: cubic-bezier(0.45, 0, 0.2, 1);
+
+  /* Shadows */
+  --shadow-pop: 0 40px 120px rgba(0, 0, 0, 0.55);
+  --shadow-toast: 0 20px 50px rgba(0, 0, 0, 0.45);
+}
