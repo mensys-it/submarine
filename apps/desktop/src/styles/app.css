@@ -18,6 +18,23 @@ body,
   margin: 0;
 }
 
+/* The page itself never scrolls, only the panes inside it do. Without this a two finger
+   swipe on a trackpad drags the whole window content with the elastic overscroll of the
+   webview (WKWebView on macOS, WebView2 on Windows), like a web page in a browser. */
+html,
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* NB: the scrollable panes MUST NOT bounce or chain their scroll to the page either. */
+.main,
+.sidebar,
+.modal,
+.picker-list {
+  overscroll-behavior: none;
+}
+
 body {
   background: var(--bg-body);
   color: var(--text);
