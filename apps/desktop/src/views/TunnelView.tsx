@@ -19,6 +19,7 @@ const heroStates: Record<ConnectionState, HeroState> = {
   disconnected: "off",
   disconnecting: "off",
   connecting: "connecting",
+  reconnecting: "connecting",
   connected: "on",
   failed: "error",
 };
@@ -72,11 +73,13 @@ export function TunnelView({ tunnel }: { tunnel: TunnelInfo }) {
   const peer = isThis ? status.peers[0] : undefined;
   const endpoint = peer?.endpoint ?? tunnel.endpoints[0] ?? null;
   const host = endpoint ? hostOf(endpoint) : t.common.none;
+  const now = useNow();
+  const retryIn = status.retry_at == null ? null : Math.max(0, Math.ceil(status.retry_at - now));
 
   // second line of the hero, depending on the scene
   const subline = {
     off: state === "disconnecting" ? t.hero.disconnecting : t.hero.off,
-    connecting: t.hero.connecting(host),
+    connecting: state === "reconnecting" ? t.hero.reconnecting(retryIn) : t.hero.connecting(host),
     on: tunnel.full_tunnel ? t.hero.onFull : t.hero.onSplit,
     error: t.hero.error,
   }[hero];
@@ -91,6 +94,7 @@ export function TunnelView({ tunnel }: { tunnel: TunnelInfo }) {
         <h1 className="hero-title">{tunnel.name}</h1>
         <p className="hero-subline">{subline}</p>
         {state === "failed" && status.error && <ConnectError t={t} error={status.error} host={host} />}
+        {state === "reconnecting" && status.error && <p className="hero-note">{status.error}</p>}
         <div className="hero-actions">
           <MainButton
             t={t}
@@ -174,7 +178,7 @@ export function TunnelView({ tunnel }: { tunnel: TunnelInfo }) {
               type="button"
               className="link-button"
               onClick={() => setConfirmDelete(true)}
-              disabled={state === "connected" || state === "connecting" || state === "disconnecting"}
+              disabled={state !== "disconnected" && state !== "failed"}
             >
               {t.tunnel.delete}
             </button>
@@ -195,16 +199,17 @@ interface MainButtonProps {
 
 /**
  * The big connect button. While connecting it cancels, so a stuck handshake can always be
- * stopped.
+ * stopped; while reconnecting it disconnects, which also stops the retries.
  */
 function MainButton({ t, state, onConnect, onDisconnect }: MainButtonProps) {
-  const connecting = state === "connecting";
+  const connecting = state === "connecting" || state === "reconnecting";
   const label = {
     disconnected: t.hero.connect,
     connecting: t.hero.cancel,
     connected: t.hero.disconnect,
     disconnecting: t.hero.disconnectingButton,
     failed: t.hero.retry,
+    reconnecting: t.hero.disconnect,
   }[state];
   const stop = state === "connected" || connecting;
   return (

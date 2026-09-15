@@ -134,6 +134,7 @@ pub fn summary(t: &Texts, s: &Snapshot) -> String {
         ConnectionState::Connecting => with_name(t.connecting),
         ConnectionState::Disconnecting => t.disconnecting.into(),
         ConnectionState::Failed => with_name(t.failed),
+        ConnectionState::Reconnecting => with_name(t.reconnecting),
         ConnectionState::Disconnected => t.disconnected.into(),
     };
     if s.status.blocked {
@@ -179,7 +180,9 @@ fn menu(app: &AppHandle, t: &Texts, s: &Snapshot) -> tauri::Result<Menu<Wry>> {
         let live = s.status.tunnel_id.as_deref() == Some(t.id.as_str())
             && matches!(
                 s.status.state,
-                ConnectionState::Connected | ConnectionState::Connecting
+                ConnectionState::Connected
+                    | ConnectionState::Connecting
+                    | ConnectionState::Reconnecting
             );
         let id = format!("connect:{}", t.id);
         items.push(Box::new(CheckMenuItem::with_id(

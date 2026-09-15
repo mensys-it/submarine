@@ -4,7 +4,7 @@
 //! Connecting and dropping are NOT notified while the window is in front,
 //! because the window shows its own toast for those.
 
-use submarine_ipc::ConnectionState;
+use submarine_ipc::{ConnectionState, KillSwitch};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
 
@@ -32,22 +32,31 @@ pub fn on_change(app: &AppHandle, t: &Texts, before: &Snapshot, after: &Snapshot
     // connected, dropped, or traffic blocked by the kill switch: at most one of them
     if b.state != ConnectionState::Connected && a.state == ConnectionState::Connected {
         if !in_front {
-            show(
-                app,
-                t.notify_connected,
-                &format!("{} {} {name}", t.connected, t.to),
-            );
+            let title = if b.state == ConnectionState::Reconnecting {
+                t.notify_reconnected
+            } else {
+                t.notify_connected
+            };
+            show(app, title, &format!("{} {} {name}", t.connected, t.to));
         }
-    } else if b.state == ConnectionState::Connected && a.state == ConnectionState::Failed {
+    } else if b.state == ConnectionState::Connected && a.state == ConnectionState::Reconnecting {
+        // NB: the first status of a drop still carries `blocked` of the connected
+        // state, so the kill switch setting tells whether traffic is blocked now
         if !in_front {
-            let body = if a.blocked {
+            let body = if after.settings.kill_switch != KillSwitch::Off {
                 t.notify_dropped_blocked
             } else {
                 t.notify_dropped_open
             };
             show(app, t.notify_dropped, &format!("{name}: {body}"));
         }
-    } else if !b.blocked && a.blocked && a.state != ConnectionState::Connecting {
+    } else if !b.blocked
+        && a.blocked
+        && !matches!(
+            a.state,
+            ConnectionState::Connecting | ConnectionState::Reconnecting
+        )
+    {
         show(app, t.notify_blocked, t.notify_blocked_body);
     }
     // failure in applying the protection (firewall), reported whenever it appears

@@ -3,7 +3,7 @@
 // the service. NB: any change to the Rust types MUST be applied here too.
 
 /** State of the VPN connection. */
-export type ConnectionState = "disconnected" | "connecting" | "connected" | "disconnecting" | "failed";
+export type ConnectionState = "disconnected" | "connecting" | "connected" | "disconnecting" | "failed" | "reconnecting";
 
 /** Live statistics of a WireGuard peer. */
 export interface PeerStatus {
@@ -24,8 +24,10 @@ export interface Status {
   /** Name of the TUN device while connected. */
   interface: string | null;
   peers: PeerStatus[];
-  /** Reason of the last failure. */
+  /** Reason of the last failure, or of the reconnection in progress. */
   error: string | null;
+  /** Unix time in seconds of the next reconnection attempt, while waiting for it. */
+  retry_at?: number | null;
   /** The kill switch is blocking the traffic outside the tunnel. */
   blocked: boolean;
   /** Set when the kill switch or split tunneling could not be applied. */

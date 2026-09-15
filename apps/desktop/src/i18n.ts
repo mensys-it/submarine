@@ -52,10 +52,13 @@ const it = {
     connected: "Connesso",
     disconnecting: "Disconnessione…",
     failed: "Connessione interrotta",
+    reconnecting: "Riconnessione…",
   } satisfies Record<ConnectionState, string>,
   hero: {
     off: "Il sottomarino è in superficie. Connettiti per immergerti nel tunnel.",
     connecting: (host: string) => `Contatto il server ${host}…`,
+    reconnecting: (seconds: number | null) =>
+      seconds == null ? "Riprovo a raggiungere il server…" : `Il tunnel non risponde: nuovo tentativo tra ${seconds} s.`,
     onFull: "Tutto il traffico viaggia cifrato nel tunnel.",
     onSplit: "Il traffico verso le reti del tunnel viaggia cifrato.",
     disconnecting: "Il sottomarino risale in superficie.",
@@ -110,6 +113,8 @@ const it = {
     blocked: "Internet è bloccato",
     blockedApps: "Le app scelte non possono usare internet",
     dropped: (what: string) => `${what}: la VPN si è interrotta e il kill switch impedisce di uscire senza protezione.`,
+    reconnecting: (what: string) =>
+      `${what}: la VPN si è interrotta e si sta riconnettendo, intanto il kill switch impedisce di uscire senza protezione.`,
     unblock: "Sblocca internet",
     always: (what: string) => `${what} finché non ti connetti: il kill switch è attivo anche a VPN spenta.`,
     edit: "Modifica",
@@ -239,6 +244,8 @@ const it = {
     connected: (name: string) => `Connesso a ${name}`,
     failed: (name: string) => `Connessione a ${name} non riuscita`,
     dropped: (name: string) => `La connessione a ${name} si è interrotta`,
+    reconnecting: (name: string) => `La connessione a ${name} si è interrotta: mi riconnetto`,
+    reconnected: (name: string) => `Riconnesso a ${name}`,
     imported: (name: string) => `Tunnel “${name}” importato`,
     updated: (name: string) => `Tunnel “${name}” aggiornato`,
     notSaved: (error: string) => `Impostazioni non salvate: ${error}`,
@@ -295,10 +302,13 @@ const en: Texts = {
     connected: "Connected",
     disconnecting: "Disconnecting…",
     failed: "Connection lost",
+    reconnecting: "Reconnecting…",
   },
   hero: {
     off: "The submarine is on the surface. Connect to dive into the tunnel.",
     connecting: (host) => `Reaching the server ${host}…`,
+    reconnecting: (seconds) =>
+      seconds == null ? "Trying the server again…" : `The tunnel stopped answering: next attempt in ${seconds} s.`,
     onFull: "All traffic travels encrypted through the tunnel.",
     onSplit: "Traffic to the tunnel’s networks travels encrypted.",
     disconnecting: "The submarine is surfacing.",
@@ -349,6 +359,8 @@ const en: Texts = {
     blocked: "The internet is blocked",
     blockedApps: "The chosen apps cannot use the internet",
     dropped: (what) => `${what}: the VPN dropped and the kill switch keeps traffic from leaving unprotected.`,
+    reconnecting: (what) =>
+      `${what}: the VPN dropped and is reconnecting, meanwhile the kill switch keeps traffic from leaving unprotected.`,
     unblock: "Unblock internet",
     always: (what) => `${what} until you connect: the kill switch is on even when the VPN is off.`,
     edit: "Change",
@@ -476,6 +488,8 @@ const en: Texts = {
     connected: (name) => `Connected to ${name}`,
     failed: (name) => `Connection to ${name} failed`,
     dropped: (name) => `The connection to ${name} dropped`,
+    reconnecting: (name) => `The connection to ${name} dropped: reconnecting`,
+    reconnected: (name) => `Reconnected to ${name}`,
     imported: (name) => `Tunnel “${name}” imported`,
     updated: (name) => `Tunnel “${name}” updated`,
     notSaved: (error) => `Settings not saved: ${error}`,

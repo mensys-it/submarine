@@ -15,6 +15,7 @@ const idle: Status = {
   interface: null,
   peers: [],
   error: null,
+  retry_at: null,
   blocked: false,
   protection_error: null,
 };
@@ -131,8 +132,11 @@ export const useApp = create<AppState>((set, get) => {
     set({ status: next });
     const name = tunnelName(next.tunnel_id);
     if (before.state === "connecting" && next.state === "connected") get().showToast(t().toast.connected(name));
+    else if (before.state === "reconnecting" && next.state === "connected") get().showToast(t().toast.reconnected(name));
     else if (before.state === "connecting" && next.state === "failed") get().showToast(t().toast.failed(name), "error");
-    else if (before.state === "connected" && next.state === "failed") get().showToast(t().toast.dropped(name), "error");
+    else if (before.state === "connected" && next.state === "reconnecting") {
+      get().showToast(t().toast.reconnecting(name), "error");
+    }
   };
 
   // full reload of the daemon state, on start and on every reconnection

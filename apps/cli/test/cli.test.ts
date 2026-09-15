@@ -94,6 +94,25 @@ describe("commands", () => {
     expect(plain(none.lines[0])).toBe("○ Non sei connesso");
   });
 
+  // a tunnel that stopped working shows why and when the next attempt starts
+  test("status of a tunnel being reconnected", async () => {
+    const now = Date.now() / 1000;
+    daemon.status = {
+      ...daemon.status,
+      state: "reconnecting",
+      tunnel_id: "d4e5f6",
+      error: "the server has not answered for 30 s",
+      retry_at: Math.ceil(now) + 5,
+    };
+    const out = await run("status");
+    expect(out.lines.map(plain).slice(0, 4)).toEqual([
+      "◌ Riconnessione a Laboratorio",
+      "  ⎿ the server has not answered for 30 s",
+      expect.stringMatching(/^ {2}⎿ nuovo tentativo tra [56] s$/),
+      "  ⎿ /disconnect per smettere di riprovare",
+    ]);
+  });
+
   // in interactive mode the command only hands the tunnel to the prompt
   test("interactive connect is left to the prompt, which follows the steps", async () => {
     const outcome = await run("connect", ["lab"], { client, interactive: true, yes: false });

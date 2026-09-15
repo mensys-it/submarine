@@ -44,6 +44,7 @@ const idle: Status = {
   interface: null,
   peers: [],
   error: null,
+  retry_at: null,
   blocked: false,
   protection_error: null,
 };

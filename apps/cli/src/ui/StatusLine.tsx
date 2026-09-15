@@ -3,7 +3,7 @@
 
 import { Box, Text } from "ink";
 
-import { killSwitchLabels, sumBytes } from "../commands.ts";
+import { killSwitchLabels, retryIn, sumBytes } from "../commands.ts";
 import { formatAgo, formatBytes } from "../format.ts";
 import type { Seg } from "../lines.ts";
 import type { Settings, Status, TunnelInfo } from "../protocol.ts";
@@ -71,6 +71,10 @@ export function StatusLine({ service, status, tunnels, settings, spark, now }: P
         break;
       case "failed":
         left = [["✗ ", "red"], ["Connessione interrotta", "fg"], ["  /connect per riprovare", "dim"]];
+        break;
+      case "reconnecting":
+        left = [[spin, "yel"], [`Riconnessione a ${name}…`, "fg"]];
+        if (status.retry_at) left.push([`  nuovo tentativo tra ${retryIn(status.retry_at, now)} s`, "dim"]);
         break;
       default:
         left = [["○ ", "dim"], ["Non connesso", "dim"]];

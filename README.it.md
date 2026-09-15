@@ -56,6 +56,10 @@ submarine killswitch on
   (Linux e Windows).
 - **Cambi di rete seguiti.** Passando da Wi-Fi a cavo il traffico cifrato si sposta sulla nuova
   interfaccia senza far cadere il tunnel.
+- **Riconnessione automatica.** Un tunnel che si interrompe, o il cui server non risponde agli
+  handshake per 30 secondi, viene ricollegato con attese crescenti (da 1 s fino a 1 min),
+  risolvendo di nuovo il nome del server. Con il kill switch il traffico resta bloccato nel
+  frattempo.
 - **App desktop e CLI.** Un'app Tauri con icona nella tray e un prompt Ink con completamento,
   cronologia e comandi da script.
 - **Configurazione standard.** File `.conf` wg-quick, importati così come sono.

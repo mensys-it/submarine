@@ -979,7 +979,8 @@ label:has(input:focus-visible) {
   background: var(--idle);
 }
 
-.status-dot[data-state="connecting"] {
+.status-dot[data-state="connecting"],
+.status-dot[data-state="reconnecting"] {
   background: var(--amber);
   animation: pulseAmber 1.1s ease-out infinite;
 }
@@ -1284,7 +1285,8 @@ label:has(input:focus-visible) {
   color: var(--text-secondary);
 }
 
-.hero-status[data-state="connecting"] {
+.hero-status[data-state="connecting"],
+.hero-status[data-state="reconnecting"] {
   color: var(--amber-text);
 }
 
@@ -1381,7 +1383,8 @@ label:has(input:focus-visible) {
   box-shadow: 0 10px 30px var(--accent-glow);
 }
 
-.hero-button[data-state="connecting"] {
+.hero-button[data-state="connecting"],
+.hero-button[data-state="reconnecting"] {
   border: 1px solid rgba(245, 200, 122, 0.6);
   background: rgba(10, 20, 36, 0.6);
   color: var(--amber-ink);

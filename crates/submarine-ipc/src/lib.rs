@@ -129,8 +129,12 @@ pub enum ConnectionState {
     Connecting,
     Connected,
     Disconnecting,
-    /// The tunnel stopped unexpectedly; see `Status::error`.
+    /// The connection the user asked for failed; see `Status::error`.
     Failed,
+    /// The tunnel stopped working (it failed or the server stopped answering) and
+    /// is being connected again; `Status::retry_at` is set while waiting for the
+    /// next attempt. The kill switch keeps blocking meanwhile.
+    Reconnecting,
 }
 
 /// Connection status, sent on request and on every change.
@@ -144,8 +148,12 @@ pub struct Status {
     pub interface: Option<String>,
     /// Per-peer statistics while connected.
     pub peers: Vec<PeerStatus>,
-    /// Reason of the last failure (see `ConnectionState::Failed`).
+    /// Reason of the last failure (see `ConnectionState::Failed` and
+    /// `ConnectionState::Reconnecting`).
     pub error: Option<String>,
+    /// Unix timestamp (seconds) of the next reconnection attempt, while
+    /// reconnecting and waiting for it.
+    pub retry_at: Option<u64>,
     /// The kill switch is currently blocking traffic outside the tunnel.
     pub blocked: bool,
     /// Set when the kill switch or split tunneling could not be applied.
@@ -158,8 +166,9 @@ pub struct Status {
 pub enum KillSwitch {
     #[default]
     Off,
-    /// Block traffic outside the tunnel while connected, and keep blocking if
-    /// the tunnel drops unexpectedly, until the user disconnects.
+    /// Block traffic outside the tunnel while connected, and keep blocking
+    /// while a tunnel that stopped working is reconnected, until the user
+    /// disconnects.
     OnConnect,
     /// Block traffic outside the tunnel at all times, even when disconnected.
     Always,

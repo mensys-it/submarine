@@ -187,6 +187,9 @@ export const sumBytes = (st: Status) => ({
  *
  * `list` gives the tunnel name; `now` (Unix seconds) is the reference for the handshake age.
  */
+/** Seconds left before the reconnection attempt at `retryAt` (Unix seconds), never negative. */
+export const retryIn = (retryAt: number, now = Date.now() / 1000) => Math.max(0, Math.ceil(retryAt - now));
+
 export function describeStatus(st: Status, list: TunnelInfo[], now = Date.now() / 1000): Line[] {
   const name = list.find((t) => t.id === st.tunnel_id)?.name ?? "tunnel";
   const out: Line[] = [];
@@ -209,6 +212,12 @@ export function describeStatus(st: Status, list: TunnelInfo[], now = Date.now() 
       out.push(head([marks.fail, "red"], "Connessione interrotta"));
       if (st.error) out.push(sub(st.error, "faint"));
       out.push(sub("/connect per riprovare"));
+      break;
+    case "reconnecting":
+      out.push(head([marks.wait, "yel"], `Riconnessione a ${name}`));
+      if (st.error) out.push(sub(st.error, "faint"));
+      if (st.retry_at) out.push(sub(`nuovo tentativo tra ${retryIn(st.retry_at, now)} s`));
+      out.push(sub("/disconnect per smettere di riprovare"));
       break;
     default:
       out.push(head([marks.off, "dim"], "Non connesso"));

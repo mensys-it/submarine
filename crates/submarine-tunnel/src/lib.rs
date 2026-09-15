@@ -93,6 +93,11 @@ pub struct PeerStats {
     pub endpoint: Option<SocketAddr>,
     /// Time of the last completed handshake, if any.
     pub last_handshake: Option<SystemTime>,
+    /// How long the peer has not answered our handshake initiations: `None`
+    /// when no initiation is waiting for an answer. Only grows while there is
+    /// traffic to send (or a persistent keepalive), as WireGuard starts
+    /// handshakes on demand.
+    pub handshake_pending: Option<Duration>,
     /// Bytes sent to the peer.
     pub tx_bytes: u64,
     /// Bytes received from the peer.
@@ -370,7 +375,7 @@ async fn tun_loop(shared: Arc<Shared>) -> io::Result<()> {
             classify(dst.as_ptr() as usize, tunn.encapsulate(packet, &mut dst))
         };
         if let Action::Network(range) = action {
-            send_best_effort(&shared, &dst[range], endpoint).await;
+            send_best_effort(&shared, peer, &dst[range], endpoint).await;
         }
     }
 }
@@ -404,7 +409,7 @@ async fn udp_loop(shared: Arc<Shared>) -> io::Result<()> {
                 // any authenticated datagram updates the peer endpoint (roaming)
                 Action::Network(range) => {
                     peer.set_endpoint(from);
-                    send_best_effort(&shared, &dst[range], from).await;
+                    send_best_effort(&shared, peer, &dst[range], from).await;
                     // flush of the packets queued while the handshake was in progress
                     input = &[];
                 }
@@ -437,14 +442,17 @@ async fn timer_loop(shared: Arc<Shared>) {
                 classify(dst.as_ptr() as usize, tunn.update_timers(&mut dst))
             };
             if let Action::Network(range) = action {
-                send_best_effort(&shared, &dst[range], endpoint).await;
+                send_best_effort(&shared, peer, &dst[range], endpoint).await;
             }
         }
     }
 }
 
-/// UDP send errors (e.g. network temporarily unreachable) must not kill the tunnel.
-async fn send_best_effort(shared: &Shared, buf: &[u8], to: SocketAddr) {
+/// Sends a datagram to `peer`. UDP send errors (e.g. network temporarily
+/// unreachable) must not kill the tunnel. Handshake initiations are recorded
+/// even when the send fails: the peer is not answering either way.
+async fn send_best_effort(shared: &Shared, peer: &Peer, buf: &[u8], to: SocketAddr) {
+    peer.note_sent(buf);
     if let Err(err) = shared.socket.send_to(buf, to).await {
         tracing::debug!(%to, "udp send failed: {err}");
     }

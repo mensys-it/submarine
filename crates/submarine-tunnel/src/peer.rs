@@ -2,7 +2,7 @@
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Mutex, RwLock};
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 
 use boringtun::noise::Tunn;
 use boringtun::x25519;
@@ -13,6 +13,9 @@ use submarine_config::PublicKey;
 
 use crate::PeerStats;
 
+/// First byte of a WireGuard handshake initiation message.
+const HANDSHAKE_INIT: u8 = 1;
+
 /// Runtime state of a peer: its boringtun session and current endpoint.
 pub(crate) struct Peer {
     /// Public key identifying the peer.
@@ -21,6 +24,9 @@ pub(crate) struct Peer {
     pub tunn: Mutex<Tunn>,
     /// Updated to the source of the latest authenticated packet (roaming).
     pub endpoint: RwLock<Option<SocketAddr>>,
+    /// Time of the first handshake initiation sent since the latest completed
+    /// handshake: how long the peer has left us waiting for an answer.
+    handshake_sent: Mutex<Option<Instant>>,
 }
 
 impl Peer {
@@ -44,6 +50,7 @@ impl Peer {
             public_key: peer.public_key,
             tunn: Mutex::new(tunn),
             endpoint: RwLock::new(endpoint),
+            handshake_sent: Mutex::new(None),
         }
     }
 
@@ -60,13 +67,34 @@ impl Peer {
         }
     }
 
+    /// Records a datagram about to be sent to the peer: a handshake initiation
+    /// starts the wait for an answer, unless one is already pending.
+    pub fn note_sent(&self, datagram: &[u8]) {
+        if datagram.first() == Some(&HANDSHAKE_INIT) {
+            self.handshake_sent
+                .lock()
+                .unwrap()
+                .get_or_insert_with(Instant::now);
+        }
+    }
+
     /// Snapshot of the peer statistics; the handshake age is converted to a wall-clock time.
     pub fn stats(&self) -> PeerStats {
         let (since_handshake, tx_bytes, rx_bytes, _, _) = self.tunn.lock().unwrap().stats();
+        let now = Instant::now();
+        // the wait ends with a handshake completed after the first initiation
+        let handshake_at = since_handshake.and_then(|d| now.checked_sub(d));
+        let mut sent = self.handshake_sent.lock().unwrap();
+        if let (Some(sent_at), Some(done_at)) = (*sent, handshake_at)
+            && done_at >= sent_at
+        {
+            *sent = None;
+        }
         PeerStats {
             public_key: self.public_key,
             endpoint: self.endpoint(),
             last_handshake: since_handshake.and_then(|d| SystemTime::now().checked_sub(d)),
+            handshake_pending: sent.map(|sent_at| now.duration_since(sent_at)),
             tx_bytes: tx_bytes as u64,
             rx_bytes: rx_bytes as u64,
         }

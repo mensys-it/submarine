@@ -56,6 +56,9 @@ submarine killswitch on
   them (Linux and Windows).
 - **Network changes followed.** Moving from Wi-Fi to cable moves the encrypted traffic to the
   new interface without dropping the tunnel.
+- **Automatic reconnection.** A tunnel that fails, or whose server leaves the handshakes
+  unanswered for 30 seconds, is connected again with growing delays (1 s up to 1 min),
+  resolving the server name again. With the kill switch, traffic stays blocked meanwhile.
 - **Desktop app and CLI.** A Tauri app with tray icon and an Ink prompt with completion,
   history and scriptable commands.
 - **Standard configuration.** Plain wg-quick `.conf` files, imported as they are.

@@ -10,7 +10,13 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open } from "@tauri-apps/plugin-dialog";
 
 /** Life cycle of the tunnel connection, as reported by the daemon. */
-export type ConnectionState = "disconnected" | "connecting" | "connected" | "disconnecting" | "failed";
+export type ConnectionState =
+  | "disconnected"
+  | "connecting"
+  | "connected"
+  | "disconnecting"
+  | "failed"
+  | "reconnecting";
 
 /** Live state of one WireGuard peer of the active tunnel. */
 export interface PeerStatus {
@@ -31,8 +37,10 @@ export interface Status {
   /** Name of the network interface of the tunnel, once it exists. */
   interface: string | null;
   peers: PeerStatus[];
-  /** Why the last connection attempt failed, if it did. */
+  /** Why the last connection attempt failed, or why the tunnel is being reconnected. */
   error: string | null;
+  /** Unix time in seconds of the next reconnection attempt, while waiting for it. */
+  retry_at: number | null;
   /** The kill switch is blocking traffic outside the tunnel right now. */
   blocked: boolean;
   /** Why the kill switch or split tunneling could not be applied, if they could not. */

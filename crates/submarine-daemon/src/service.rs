@@ -9,11 +9,17 @@
 //! bringing the tunnel up, so a disconnect (or another connect) can cancel
 //! it: each attempt has a generation, and an attempt whose generation is no
 //! longer current undoes its own work and gives up.
+//!
+//! A tunnel the user wants connected is kept working: when it fails, or its
+//! server stops answering the handshakes, it is torn down and connected again
+//! (resolving the endpoint hostnames again) with growing delays between the
+//! attempts.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use submarine_config::{Endpoint, TunnelConfig};
 use submarine_ipc::{
@@ -35,6 +41,30 @@ const INTERFACE_NAME: &str = "submarine0";
 const STATS_INTERVAL: Duration = Duration::from_secs(1);
 /// Maximum number of apps in the split tunneling list.
 const MAX_SPLIT_APPS: usize = 256;
+/// A tunnel whose peers leave the handshakes unanswered for this long is
+/// connected again. WireGuard retries a handshake every 5 seconds, so this is
+/// about six attempts.
+const STALL_TIMEOUT: Duration = Duration::from_secs(30);
+/// Delays before the consecutive attempts to reconnect a tunnel that stopped
+/// working; the last one repeats until an attempt succeeds.
+const RETRY_DELAYS: [Duration; 6] = [
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+    Duration::from_secs(10),
+    Duration::from_secs(30),
+    Duration::from_secs(60),
+];
+
+/// Who started a connection attempt, which decides what a failure does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Attempt {
+    /// The user: a failure ends in the `Failed` state.
+    User,
+    /// The service itself, at startup or after the tunnel stopped working: a
+    /// failure schedules another attempt.
+    Retry,
+}
 
 /// The running tunnel and the OS changes made for it.
 struct Active {
@@ -66,9 +96,9 @@ struct Inner {
     resolving: bool,
     /// Resolved endpoints of the tunnel being connected or running.
     endpoints: Vec<SocketAddr>,
-    /// The tunnel dropped unexpectedly with the `on_connect` kill switch:
-    /// keep blocking until the user disconnects.
-    blocked_after_drop: bool,
+    /// Consecutive reconnection attempts since the tunnel last worked; picks
+    /// the delay in `RETRY_DELAYS`.
+    retries: u32,
     /// Kill switch rules.
     firewall: Firewall,
     /// Split tunneling (per-app routing).
@@ -124,7 +154,7 @@ impl Service {
                 settings: store.settings(),
                 resolving: false,
                 endpoints: Vec::new(),
-                blocked_after_drop: false,
+                retries: 0,
                 firewall: Firewall::new(),
                 split,
             }),
@@ -134,7 +164,8 @@ impl Service {
         });
 
         // the tunnel left connected wins over the auto-connect one; both are used
-        // only if they still exist, and a stale connected tunnel is forgotten
+        // only if they still exist, and a stale connected tunnel is forgotten.
+        // Both are retried until they connect: at boot the network may not be up yet
         let restore = service.store.connected_tunnel();
         let restore = restore.filter(|id| service.store.get(id).is_ok());
         if restore.is_none() {
@@ -149,7 +180,7 @@ impl Service {
                 tracing::info!(%id, "connecting at startup");
                 let service = service.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = service.connect(&id).await {
+                    if let Err(err) = service.connect(&id, Attempt::Retry, None).await {
                         tracing::error!("reconnect failed: {err}");
                         // a failure before the attempt started (e.g. the tunnel became
                         // unreadable) never reaches `sync_protection`: the firewall would
@@ -195,7 +226,9 @@ impl Service {
             Request::DeleteTunnel { id } => self.delete(&id).await,
             Request::Connect { id } => {
                 self.store.save_connected_tunnel(Some(&id)).map_err(err)?;
-                self.connect(&id).await.map(|()| Response::Ok)
+                self.connect(&id, Attempt::User, None)
+                    .await
+                    .map(|()| Response::Ok)
             }
             Request::Disconnect => {
                 self.store.save_connected_tunnel(None).map_err(err)?;
@@ -246,7 +279,9 @@ impl Service {
             inner.status.tunnel_id.as_deref() == Some(id)
                 && matches!(
                     inner.status.state,
-                    ConnectionState::Connecting | ConnectionState::Connected
+                    ConnectionState::Connecting
+                        | ConnectionState::Connected
+                        | ConnectionState::Reconnecting
                 )
         };
         if in_use && parsed.config != previous.config {
@@ -254,7 +289,7 @@ impl Service {
             let service = self.clone();
             let id = id.to_owned();
             tokio::spawn(async move {
-                if let Err(e) = service.connect(&id).await {
+                if let Err(e) = service.connect(&id, Attempt::Retry, None).await {
                     tracing::error!("reconnect failed: {e}");
                 }
             });
@@ -309,10 +344,6 @@ impl Service {
                 }
             }
         }
-        // the block after a drop exists only with the `on_connect` kill switch
-        if settings.kill_switch != KillSwitch::OnConnect {
-            inner.blocked_after_drop = false;
-        }
         self.sync_protection(&mut inner).await;
         let _ = self.events.send(Event::SettingsChanged(settings.clone()));
         Ok(settings)
@@ -320,33 +351,53 @@ impl Service {
 
     /// Connects tunnel `id`, replacing the running one if any.
     ///
+    /// `attempt` decides what a failure does (see [`Attempt`]). `expected` is
+    /// the generation a scheduled attempt was planned in: the attempt is
+    /// dropped if the user connected or disconnected since.
+    ///
     /// Returns Ok also when the attempt is cancelled by a later connect or
     /// disconnect: the caller asked for something that no longer applies.
-    async fn connect(self: &Arc<Self>, id: &str) -> Result<()> {
+    async fn connect(
+        self: &Arc<Self>,
+        id: &str,
+        attempt: Attempt,
+        expected: Option<u64>,
+    ) -> Result<()> {
         let stored = self.store.get(id).map_err(err)?;
         // start of a new attempt: the previous tunnel is torn down and the status
-        // becomes `Connecting`
+        // becomes `Connecting`, or stays `Reconnecting` with the reason of the retry
         let generation = {
             let mut inner = self.inner.lock().await;
+            if expected.is_some_and(|g| g != inner.generation) {
+                return Ok(());
+            }
             if let Some(active) = inner.active.take() {
                 teardown(active).await;
             }
             inner.generation += 1;
-            inner.blocked_after_drop = false;
+            if attempt == Attempt::User {
+                inner.retries = 0;
+            }
             inner.endpoints.clear();
             inner.resolving = stored
                 .config
                 .peers
                 .iter()
                 .any(|p| matches!(p.endpoint, Some(Endpoint::Host { .. })));
-            self.set_status(
-                &mut inner,
-                Status {
+            let status = match attempt {
+                Attempt::User => Status {
                     state: ConnectionState::Connecting,
                     tunnel_id: Some(id.to_owned()),
                     ..Status::default()
                 },
-            );
+                Attempt::Retry => Status {
+                    state: ConnectionState::Reconnecting,
+                    tunnel_id: Some(id.to_owned()),
+                    error: inner.status.error.clone(),
+                    ..Status::default()
+                },
+            };
+            self.set_status(&mut inner, status);
             // block before resolving and handshaking, so nothing leaks meanwhile
             self.sync_protection(&mut inner).await;
             inner.generation
@@ -425,6 +476,12 @@ impl Service {
                 self.sync_protection(&mut inner).await;
                 Ok(())
             }
+            // failure of a retry: another one is scheduled
+            Err(message) if attempt == Attempt::Retry => {
+                tracing::error!("reconnect failed: {message}");
+                self.schedule_retry(&mut inner, id, message.clone()).await;
+                Err(message)
+            }
             // failure: `Failed` status, the kill switch stays as configured
             Err(message) => {
                 tracing::error!("connect failed: {message}");
@@ -449,7 +506,7 @@ impl Service {
     pub async fn disconnect(&self) {
         let mut inner = self.inner.lock().await;
         inner.generation += 1;
-        inner.blocked_after_drop = false;
+        inner.retries = 0;
         inner.resolving = false;
         inner.endpoints.clear();
         if let Some(active) = inner.active.take() {
@@ -467,6 +524,48 @@ impl Service {
         // also clears a previous failure
         self.set_status(&mut inner, Status::default());
         self.sync_protection(&mut inner).await;
+    }
+
+    /// Tears down what is left of the tunnel and schedules another attempt to
+    /// connect `id`, after a delay that grows with each consecutive retry. The
+    /// status stays `Reconnecting`, and the kill switch keeps blocking, until
+    /// an attempt succeeds or the user connects or disconnects.
+    async fn schedule_retry(self: &Arc<Self>, inner: &mut Inner, id: &str, reason: String) {
+        if let Some(active) = inner.active.take() {
+            teardown(active).await;
+        }
+        inner.generation += 1;
+        inner.resolving = false;
+        inner.endpoints.clear();
+        let delay = RETRY_DELAYS[(inner.retries as usize).min(RETRY_DELAYS.len() - 1)];
+        inner.retries = inner.retries.saturating_add(1);
+        tracing::info!(%id, "reconnecting in {} s", delay.as_secs());
+        self.set_status(
+            inner,
+            Status {
+                state: ConnectionState::Reconnecting,
+                tunnel_id: Some(id.to_owned()),
+                error: Some(reason),
+                retry_at: Some(unix_now() + delay.as_secs()),
+                ..Status::default()
+            },
+        );
+        self.sync_protection(inner).await;
+        let generation = inner.generation;
+        self.spawn_retry(id.to_owned(), delay, generation);
+    }
+
+    /// Connects `id` again after `delay`, unless the generation changed meanwhile.
+    ///
+    /// NB: the future is boxed because `connect` itself schedules retries: a
+    /// plain `async` block would make its type recursive.
+    fn spawn_retry(self: &Arc<Self>, id: String, delay: Duration, generation: u64) {
+        let service = self.clone();
+        let retry: Pin<Box<dyn Future<Output = ()> + Send>> = Box::pin(async move {
+            tokio::time::sleep(delay).await;
+            let _ = service.connect(&id, Attempt::Retry, Some(generation)).await;
+        });
+        tokio::spawn(retry);
     }
 
     /// Stops the tunnel on daemon shutdown. The firewall is left as it is, so
@@ -488,9 +587,9 @@ impl Service {
         let _ = inner.split.stop().await;
     }
 
-    /// Publishes live statistics and reacts to the tunnel failing. Runs until
-    /// `stop` is dropped or the tunnel of `generation` is no longer the active
-    /// one.
+    /// Publishes live statistics and reacts to the tunnel failing or its server
+    /// no longer answering. Runs until `stop` is dropped or the tunnel of
+    /// `generation` is no longer the active one.
     async fn monitor(
         self: Arc<Self>,
         generation: u64,
@@ -507,13 +606,31 @@ impl Service {
                     return;
                 }
                 _ = tick.tick() => {
-                    // refresh of the peer statistics and check for a network change
                     let mut inner = self.inner.lock().await;
                     let Some(active) = inner.active.as_ref().filter(|a| a.generation == generation) else {
                         return;
                     };
+                    let stats = active.tunnel.stats();
+
+                    // a server that stopped answering: connecting again also resolves
+                    // its hostname again, in case its address changed
+                    if is_stalled(&stats) {
+                        let Some(id) = inner.status.tunnel_id.clone() else {
+                            return;
+                        };
+                        let reason = format!("the server has not answered for {} s", STALL_TIMEOUT.as_secs());
+                        tracing::warn!("{reason}");
+                        self.schedule_retry(&mut inner, &id, reason).await;
+                        return;
+                    }
+                    // a completed handshake proves that the tunnel works again
+                    if stats.iter().any(|s| s.last_handshake.is_some()) {
+                        inner.retries = 0;
+                    }
+
+                    // refresh of the peer statistics and check for a network change
                     let mut status = inner.status.clone();
-                    status.peers = peer_status(active.tunnel.stats());
+                    status.peers = peer_status(stats);
                     self.set_status(&mut inner, status);
                     let inner = &mut *inner;
                     follow_network_change(inner.active.as_mut().expect("checked above"), &mut inner.split).await;
@@ -522,10 +639,9 @@ impl Service {
         }
     }
 
-    /// Handles the failure of a running tunnel: tears it down and reports
-    /// `Failed`. With the `on_connect` kill switch traffic stays blocked until the
-    /// user disconnects. Ignored if the tunnel of `generation` is gone already.
-    async fn on_failure(&self, generation: u64, reason: String) {
+    /// Handles the failure of a running tunnel: tears it down and schedules a
+    /// reconnection. Ignored if the tunnel of `generation` is gone already.
+    async fn on_failure(self: &Arc<Self>, generation: u64, reason: String) {
         let mut inner = self.inner.lock().await;
         if inner
             .active
@@ -535,21 +651,10 @@ impl Service {
             return;
         }
         tracing::error!("tunnel failed: {reason}");
-        let active = inner.active.take().expect("checked above");
-        teardown(active).await;
-        inner.endpoints.clear();
-        inner.blocked_after_drop = inner.settings.kill_switch == KillSwitch::OnConnect;
-        let tunnel_id = inner.status.tunnel_id.clone();
-        self.set_status(
-            &mut inner,
-            Status {
-                state: ConnectionState::Failed,
-                tunnel_id,
-                error: Some(reason),
-                ..Status::default()
-            },
-        );
-        self.sync_protection(&mut inner).await;
+        let Some(id) = inner.status.tunnel_id.clone() else {
+            return;
+        };
+        self.schedule_retry(&mut inner, &id, reason).await;
     }
 
     /// Applies the firewall and split tunneling for the current state, and updates
@@ -560,12 +665,12 @@ impl Service {
         let state = inner.status.state;
         let block = match inner.settings.kill_switch {
             KillSwitch::Off => false,
-            KillSwitch::OnConnect => {
-                matches!(
-                    state,
-                    ConnectionState::Connecting | ConnectionState::Connected
-                ) || inner.blocked_after_drop
-            }
+            KillSwitch::OnConnect => matches!(
+                state,
+                ConnectionState::Connecting
+                    | ConnectionState::Connected
+                    | ConnectionState::Reconnecting
+            ),
             KillSwitch::Always => true,
         };
         // firewall policy: DNS is allowed only while resolving the endpoints;
@@ -787,6 +892,21 @@ async fn reset_parts(routes: &mut RouteManager, dns: &mut DnsManager) {
     }
 }
 
+/// Whether the tunnel stopped working: every peer with an endpoint has left
+/// the handshakes unanswered for `STALL_TIMEOUT`. With several peers, one
+/// that is down alone does not reconnect the others.
+fn is_stalled(stats: &[PeerStats]) -> bool {
+    let mut peers = stats.iter().filter(|s| s.endpoint.is_some()).peekable();
+    peers.peek().is_some() && peers.all(|s| s.handshake_pending.is_some_and(|d| d >= STALL_TIMEOUT))
+}
+
+/// Current Unix time in seconds.
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
 /// Converts the tunnel statistics to the IPC form (handshake as Unix seconds).
 fn peer_status(stats: Vec<PeerStats>) -> Vec<PeerStatus> {
     stats
@@ -807,4 +927,58 @@ fn peer_status(stats: Vec<PeerStats>) -> Vec<PeerStatus> {
 /// Converts an error to the message for the client.
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use submarine_config::PublicKey;
+
+    /// Statistics of a peer with an endpoint, waiting for a handshake for `pending`.
+    fn peer(pending: Option<Duration>) -> PeerStats {
+        PeerStats {
+            public_key: PublicKey::from_bytes([7; 32]),
+            endpoint: Some("192.0.2.1:51820".parse().unwrap()),
+            last_handshake: None,
+            handshake_pending: pending,
+            tx_bytes: 0,
+            rx_bytes: 0,
+        }
+    }
+
+    // a single peer is stalled only after the whole timeout
+    #[test]
+    fn single_peer_stalls_after_the_timeout() {
+        assert!(!is_stalled(&[peer(None)]));
+        assert!(!is_stalled(&[peer(Some(
+            STALL_TIMEOUT - Duration::from_secs(1)
+        ))]));
+        assert!(is_stalled(&[peer(Some(STALL_TIMEOUT))]));
+    }
+
+    // one silent peer among working ones does not reconnect the tunnel
+    #[test]
+    fn one_silent_peer_does_not_stall_the_others() {
+        assert!(!is_stalled(&[peer(Some(STALL_TIMEOUT)), peer(None)]));
+        assert!(is_stalled(&[
+            peer(Some(STALL_TIMEOUT)),
+            peer(Some(STALL_TIMEOUT))
+        ]));
+    }
+
+    // peers without an endpoint never start handshakes and are ignored
+    #[test]
+    fn peers_without_endpoint_are_ignored() {
+        let mut roaming = peer(None);
+        roaming.endpoint = None;
+        assert!(!is_stalled(&[roaming.clone()]));
+        assert!(is_stalled(&[roaming, peer(Some(STALL_TIMEOUT))]));
+    }
+
+    // the retry delays grow and then stay at the last one
+    #[test]
+    fn retry_delays_grow() {
+        assert!(RETRY_DELAYS.windows(2).all(|w| w[0] < w[1]));
+    }
 }

@@ -25,12 +25,19 @@ export function ProtectionBanner() {
   // what is blocked, and whether the block follows a dropped connection or the settings
   const onlyApps = settings.split_mode === "include" && settings.split_apps.length > 0;
   const what = onlyApps ? t.banner.blockedApps : t.banner.blocked;
-  const dropped = status.state === "failed";
+  // a tunnel that dropped: failed for good, or being reconnected
+  const dropped = status.state === "failed" || status.state === "reconnecting";
 
   return (
     <div className="banner" data-kind="blocked" role="status">
       <Icon name="shield" />
-      <p>{dropped ? t.banner.dropped(what) : t.banner.always(what)}</p>
+      <p>
+        {status.state === "reconnecting"
+          ? t.banner.reconnecting(what)
+          : dropped
+            ? t.banner.dropped(what)
+            : t.banner.always(what)}
+      </p>
       {/* after a drop the way out is disconnecting, otherwise changing the settings */}
       {dropped ? (
         <button type="button" className="btn btn-secondary" onClick={disconnect}>
