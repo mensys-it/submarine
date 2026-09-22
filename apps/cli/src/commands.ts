@@ -7,7 +7,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
-import { formatAgo, formatBytes, formatClock } from "./format.ts";
+import { formatAgo, formatBytes, formatClock, formatDuration } from "./format.ts";
 import type { DaemonClient } from "./ipc.ts";
 import { head, type Line, marks, sub } from "./lines.ts";
 import type { KillSwitch, Settings, SplitTunnelMode, Status, TunnelInfo } from "./protocol.ts";
@@ -196,6 +196,7 @@ export function describeStatus(st: Status, list: TunnelInfo[], now = Date.now() 
   switch (st.state) {
     case "connected": {
       out.push(head([marks.on, "acc"], `Connesso a ${name}`));
+      if (st.connected_since) out.push(sub(`da ${formatDuration(now - st.connected_since)}`));
       const handshake = st.peers[0]?.last_handshake;
       out.push(sub(handshake ? `handshake ${formatAgo(handshake, now)}` : "nessun handshake per ora"));
       const { rx, tx } = sumBytes(st);

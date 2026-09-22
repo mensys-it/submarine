@@ -53,6 +53,8 @@ pub struct Texts {
     pub disconnected: &'static str,
     /// Joins a state and a tunnel name: "Connesso a Ufficio".
     pub to: &'static str,
+    /// Decimal separator of the traffic counters.
+    pub decimal: &'static str,
     pub internet_blocked: &'static str,
     pub no_tunnels: &'static str,
     pub disconnect: &'static str,
@@ -78,6 +80,7 @@ const IT: Texts = Texts {
     reconnecting: "Riconnessione in corso",
     disconnected: "Non connesso",
     to: "a",
+    decimal: ",",
     internet_blocked: "internet bloccato",
     no_tunnels: "Nessun tunnel importato",
     disconnect: "Disconnetti",
@@ -103,6 +106,7 @@ const EN: Texts = Texts {
     reconnecting: "Reconnecting",
     disconnected: "Not connected",
     to: "to",
+    decimal: ".",
     internet_blocked: "internet blocked",
     no_tunnels: "No tunnels imported",
     disconnect: "Disconnect",

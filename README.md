@@ -61,6 +61,8 @@ submarine killswitch on
   resolving the server name again. With the kill switch, traffic stays blocked meanwhile.
 - **Desktop app and CLI.** A Tauri app with tray icon and an Ink prompt with completion,
   history and scriptable commands.
+- **Live traffic.** Download and upload rates, a chart of the last minute and the session
+  time in the app; rates, a sparkline and the session time in the CLI status line.
 - **Standard configuration.** Plain wg-quick `.conf` files, imported as they are.
 
 ## Quick Start

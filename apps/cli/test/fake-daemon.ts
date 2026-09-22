@@ -150,7 +150,14 @@ export class FakeDaemon {
     // a hostname endpoint is shown resolved to a documentation address
     const endpoint = tunnel.endpoints[0]?.replace(/^[^:]+/, (h) => (/^\d/.test(h) ? h : "203.0.113.10")) ?? null;
     const peer = { public_key: "k", endpoint, last_handshake: null as number | null, rx_bytes: 0, tx_bytes: 0 };
-    this.setStatus({ ...idle, state: "connected", tunnel_id: id, interface: "submarine0", peers: [peer] });
+    this.setStatus({
+      ...idle,
+      state: "connected",
+      tunnel_id: id,
+      interface: "submarine0",
+      peers: [peer],
+      connected_since: Math.floor(Date.now() / 1000),
+    });
     // first handshake after one more step, then statistics every `statsMs`
     setTimeout(() => {
       if (!current() || this.silentServer) return;

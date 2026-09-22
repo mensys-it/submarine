@@ -3,8 +3,8 @@
 
 import { Box, Text } from "ink";
 
-import { killSwitchLabels, retryIn, sumBytes } from "../commands.ts";
-import { formatAgo, formatBytes } from "../format.ts";
+import { killSwitchLabels, retryIn } from "../commands.ts";
+import { formatAgo, formatBytes, formatDuration } from "../format.ts";
 import type { Seg } from "../lines.ts";
 import type { Settings, Status, TunnelInfo } from "../protocol.ts";
 import { useFrame } from "./Frame.tsx";
@@ -12,6 +12,13 @@ import { SPIN, textProps } from "./theme.ts";
 
 /** State of the connection to the service, not to the VPN. */
 export type Service = "connecting" | "up" | "down";
+
+/** Bytes received and sent in the latest second, as of Unix time `at` (seconds). */
+export interface Rate {
+  rx: number;
+  tx: number;
+  at: number;
+}
 
 interface Props {
   service: Service;
@@ -23,7 +30,9 @@ interface Props {
   settings: Settings | null;
   /** Bytes received between consecutive updates from the service. */
   spark: number[];
-  /** Unix time in seconds, for the handshake age. */
+  /** Latest throughput; null until two updates of the same tunnel arrived. */
+  rate: Rate | null;
+  /** Unix time in seconds, for the session time, the handshake age and the rate age. */
   now: number;
 }
 
@@ -38,7 +47,7 @@ export function sparkline(values: number[]): string {
 }
 
 /** One line under the prompt: connection on the left, protection on the right. */
-export function StatusLine({ service, status, tunnels, settings, spark, now }: Props) {
+export function StatusLine({ service, status, tunnels, settings, spark, rate, now }: Props) {
   const { t } = useFrame();
   const spin = SPIN[t % SPIN.length] + " ";
   const name = tunnels.find((x) => x.id === status?.tunnel_id)?.name ?? "tunnel";
@@ -50,16 +59,18 @@ export function StatusLine({ service, status, tunnels, settings, spark, now }: P
   else {
     switch (status.state) {
       case "connected": {
-        const { rx, tx } = sumBytes(status);
+        // the service sends nothing while the counters stand still: an old rate is zero
+        const fresh = rate && now - rate.at < 2 ? rate : null;
         const handshake = status.peers[0]?.last_handshake;
         left = [
           // a slow pulse, every 8 frames
           [(t >> 3) % 2 ? "◉ " : "● ", "acc"],
           [name, "bold"],
-          [`  ↓ ${formatBytes(rx)}`, "fg"],
-          [`  ↑ ${formatBytes(tx)}`, "fg"],
+          [`  ↓ ${formatBytes(fresh?.rx ?? 0)}/s`, "fg"],
+          [`  ↑ ${formatBytes(fresh?.tx ?? 0)}/s`, "fg"],
         ];
         if (spark.length) left.push([`  ${sparkline(spark)}`, "acc"]);
+        if (status.connected_since) left.push([`  ${formatDuration(now - status.connected_since)}`, "fg"]);
         left.push([handshake ? `  handshake ${formatAgo(handshake, now)}` : "  nessun handshake", "dim"]);
         break;
       }

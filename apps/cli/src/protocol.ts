@@ -26,6 +26,8 @@ export interface Status {
   peers: PeerStatus[];
   /** Reason of the last failure, or of the reconnection in progress. */
   error: string | null;
+  /** Unix time in seconds of when the tunnel came up, while connected. */
+  connected_since?: number | null;
   /** Unix time in seconds of the next reconnection attempt, while waiting for it. */
   retry_at?: number | null;
   /** The kill switch is blocking the traffic outside the tunnel. */

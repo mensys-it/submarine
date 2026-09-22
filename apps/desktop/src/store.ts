@@ -15,6 +15,7 @@ const idle: Status = {
   interface: null,
   peers: [],
   error: null,
+  connected_since: null,
   retry_at: null,
   blocked: false,
   protection_error: null,
@@ -42,6 +43,18 @@ export interface Toast {
 }
 
 /** State and actions of the store. */
+/** Throughput of the tunnel at one moment, derived from two consecutive status events. */
+export interface TrafficSample {
+  /** Unix time in milliseconds. */
+  time: number;
+  /** Bytes per second received and sent. */
+  rx: number;
+  tx: number;
+}
+
+/** How long samples are kept, a bit more than the chart window. */
+const TRAFFIC_KEEP_MS = 70_000;
+
 interface AppState {
   /** Whether the daemon is reachable; null until the first check completes. */
   daemonUp: boolean | null;
@@ -65,6 +78,8 @@ interface AppState {
   /** Whether those notes come from an import or an edit. */
   warningsFrom: "import" | "edit";
   toast: Toast | null;
+  /** Throughput of the connected tunnel, oldest first; empty when not connected. */
+  traffic: TrafficSample[];
 
   /** Subscribes to the backend and loads the initial state; called once by App. */
   start(): Promise<void>;
@@ -101,6 +116,41 @@ const message = (err: unknown) => (err instanceof Error ? err.message : String(e
 /** Last toast id handed out. */
 let toastId = 0;
 
+/** Byte counters of the previous status event of a connected tunnel. */
+let lastTotals: { tunnel: string; rx: number; tx: number; time: number } | null = null;
+
+/**
+ * Adds the throughput since the previous status event to `traffic`. The daemon sends a
+ * status every second only while something changes, so a longer gap means no traffic:
+ * it becomes zero samples, and the new bytes are counted in the last second alone.
+ */
+function sampleTraffic(traffic: TrafficSample[], next: Status, time = Date.now()): TrafficSample[] {
+  if (next.state !== "connected" || !next.tunnel_id) {
+    lastTotals = null;
+    return traffic.length ? [] : traffic;
+  }
+  const rx = next.peers.reduce((sum, p) => sum + p.rx_bytes, 0);
+  const tx = next.peers.reduce((sum, p) => sum + p.tx_bytes, 0);
+  const prev = lastTotals;
+  // a new tunnel, or counters that went back (a new session): start over
+  if (!prev || prev.tunnel !== next.tunnel_id || rx < prev.rx || tx < prev.tx) {
+    lastTotals = { tunnel: next.tunnel_id, rx, tx, time };
+    return [];
+  }
+  // other changes of the same second (e.g. the kill switch state) are not samples
+  const seconds = (time - prev.time) / 1000;
+  if (seconds < 0.5) return traffic;
+  lastTotals = { tunnel: next.tunnel_id, rx, tx, time };
+
+  const kept = traffic.filter((s) => s.time >= time - TRAFFIC_KEEP_MS);
+  if (seconds > 1.5) {
+    kept.push({ time: prev.time + 1000, rx: 0, tx: 0 }, { time: time - 1000, rx: 0, tx: 0 });
+  }
+  const span = Math.min(seconds, 1);
+  kept.push({ time, rx: (rx - prev.rx) / span, tx: (tx - prev.tx) / span });
+  return kept;
+}
+
 // NB: the sidebar state is a per-device convenience, so browser storage is enough; it may be
 // unavailable (private mode, blocked storage), hence the fallbacks
 const SIDEBAR_KEY = "submarine.sidebarCollapsed";
@@ -129,7 +179,7 @@ export const useApp = create<AppState>((set, get) => {
   // notifications while the window is in front (src-tauri/src/notify.rs)
   const setStatus = (next: Status) => {
     const before = get().status;
-    set({ status: next });
+    set({ status: next, traffic: sampleTraffic(get().traffic, next) });
     const name = tunnelName(next.tunnel_id);
     if (before.state === "connecting" && next.state === "connected") get().showToast(t().toast.connected(name));
     else if (before.state === "reconnecting" && next.state === "connected") get().showToast(t().toast.reconnected(name));
@@ -152,7 +202,7 @@ export const useApp = create<AppState>((set, get) => {
       // the active tunnel is the most useful one to show
       if (status.data.tunnel_id) set({ selectedId: status.data.tunnel_id });
     } catch {
-      set({ daemonUp: false, status: idle });
+      set({ daemonUp: false, status: idle, traffic: [] });
     }
   };
 
@@ -181,6 +231,7 @@ export const useApp = create<AppState>((set, get) => {
     importWarnings: [],
     warningsFrom: "import",
     toast: null,
+    traffic: [],
 
     async start() {
       // preferences and version are not needed to start, so they load in the background
@@ -201,7 +252,7 @@ export const useApp = create<AppState>((set, get) => {
       });
       await daemon.onConnection((connected) => {
         if (connected) void refresh();
-        else set({ daemonUp: false, status: idle });
+        else set({ daemonUp: false, status: idle, traffic: [] });
       });
       // first load, if the backend is already connected
       if (await daemon.isConnected()) await refresh();

@@ -454,6 +454,7 @@ impl Service {
                     tunnel_id: Some(id.to_owned()),
                     interface: Some(tunnel.interface_name().to_owned()),
                     peers: peer_status(tunnel.stats()),
+                    connected_since: Some(unix_now()),
                     ..Status::default()
                 };
                 let mut active = Active {

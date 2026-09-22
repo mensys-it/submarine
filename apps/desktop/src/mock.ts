@@ -44,6 +44,7 @@ const idle: Status = {
   interface: null,
   peers: [],
   error: null,
+  connected_since: null,
   retry_at: null,
   blocked: false,
   protection_error: null,
@@ -182,7 +183,14 @@ async function handle(req: Request): Promise<Response> {
         rx_bytes: rx,
         tx_bytes: tx,
       });
-      setStatus({ ...idle, state: "connected", tunnel_id: id, interface: "submarine0", peers: [peer()] });
+      setStatus({
+        ...idle,
+        state: "connected",
+        tunnel_id: id,
+        interface: "submarine0",
+        peers: [peer()],
+        connected_since: now(),
+      });
       log("info", "submarine_tunnel", `tunnel started name=submarine0 tunnel=${id}`);
       clearInterval(ticker);
       ticker = window.setInterval(() => {

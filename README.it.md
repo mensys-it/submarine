@@ -62,6 +62,8 @@ submarine killswitch on
   frattempo.
 - **App desktop e CLI.** Un'app Tauri con icona nella tray e un prompt Ink con completamento,
   cronologia e comandi da script.
+- **Traffico in tempo reale.** Velocità di ricezione e invio, un grafico dell'ultimo minuto e
+  la durata della sessione nell'app; velocità, sparkline e durata nella riga di stato della CLI.
 - **Configurazione standard.** File `.conf` wg-quick, importati così come sono.
 
 ## Avvio rapido

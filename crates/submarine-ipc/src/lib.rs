@@ -151,6 +151,8 @@ pub struct Status {
     /// Reason of the last failure (see `ConnectionState::Failed` and
     /// `ConnectionState::Reconnecting`).
     pub error: Option<String>,
+    /// Unix timestamp (seconds) of when the tunnel came up, while connected.
+    pub connected_since: Option<u64>,
     /// Unix timestamp (seconds) of the next reconnection attempt, while
     /// reconnecting and waiting for it.
     pub retry_at: Option<u64>,

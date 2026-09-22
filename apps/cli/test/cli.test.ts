@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { findCommand, findTunnel, parseLine, type Session, UsageError } from "../src/commands.ts";
-import { formatAgo, formatBytes } from "../src/format.ts";
+import { formatAgo, formatBytes, formatDuration } from "../src/format.ts";
 import { plain } from "../src/lines.ts";
 import { DaemonClient, ServiceError, socketPath } from "../src/ipc.ts";
 import { FakeDaemon } from "./fake-daemon.ts";
@@ -187,8 +187,11 @@ describe("commands", () => {
   });
 });
 
-// byte counts in the Italian locale and relative times
+// byte counts in the Italian locale, relative times and session durations
 test("formatting", () => {
   expect(formatBytes(1_234_000)).toBe("1,2 MB");
   expect(formatAgo(100, 112)).toBe("12 s fa");
+  expect(formatDuration(45)).toBe("45 s");
+  expect(formatDuration(725)).toBe("12 min 05 s");
+  expect(formatDuration(11_220)).toBe("3 h 07 min");
 });

@@ -78,8 +78,10 @@ test("interactive session: menu, connection step by step, live status", async ()
   expect(frame).toContain("● Connesso a Laboratorio");
   expect(frame).toContain("⎿ server 203.0.113.40:51820");
   expect(frame).toContain("⎿ instradamento: solo reti del tunnel");
-  await waitFor(lastFrame, "↓ 1,2 MB");
+  await waitFor(lastFrame, "↓ 1,2 MB/s");
   expect(lastFrame()).toContain("in navigazione nel tunnel");
+  // the status line shows the session time next to the rates
+  expect(lastFrame()).toMatch(/↑ [\d,]+ KB\/s .* \d+ s/);
   // the steps went through the service's events, in order
   const steps = frames.filter((f) => f.includes("Handshake con il server…"));
   expect(steps.length).toBeGreaterThan(0);

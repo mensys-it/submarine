@@ -6,7 +6,7 @@
 import { Box, Static, Text, useApp, useInput, useStdout, useWindowSize } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { type Choice, type Command, commands, findCommand, guessCommand, type Outcome, parseLine, type Session, UsageError } from "../commands.ts";
+import { type Choice, type Command, commands, findCommand, guessCommand, type Outcome, parseLine, type Session, sumBytes, UsageError } from "../commands.ts";
 import { DaemonClient } from "../ipc.ts";
 import { head, type Line, marks, sub } from "../lines.ts";
 import type { DaemonEvent, Settings, Status, TunnelInfo } from "../protocol.ts";
@@ -17,7 +17,7 @@ import { Header, type SceneState } from "./Header.tsx";
 import { LinesView } from "./LineView.tsx";
 import { Prompt } from "./Prompt.tsx";
 import { SCENE_ROWS } from "./scene.ts";
-import { type Service, StatusLine } from "./StatusLine.tsx";
+import { type Rate, type Service, StatusLine } from "./StatusLine.tsx";
 import { MENU_ROWS, type Suggestion, Suggestions } from "./Suggestions.tsx";
 import { animationsEnabled, c, palette, SPIN } from "./theme.ts";
 
@@ -159,7 +159,8 @@ export function App({ connect = connectToService, version, retryMs = 2000, anima
   const [tunnels, setTunnels, tunnelsRef] = useSyncState<TunnelInfo[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [spark, setSpark] = useState<number[]>([]);
-  const lastRx = useRef<{ tunnel: string; rx: number } | null>(null);
+  const lastBytes = useRef<{ tunnel: string; rx: number; tx: number } | null>(null);
+  const [rate, setRate] = useState<Rate | null>(null);
   const [now, setNow] = useState(() => Date.now() / 1000);
 
   // connection in progress, followed step by step
@@ -181,22 +182,33 @@ export function App({ connect = connectToService, version, retryMs = 2000, anima
     [push, setRun, runRef],
   );
 
-  // live state from the service events; the traffic sparkline gets the bytes received
-  // since the previous status, and restarts with another tunnel or when disconnected
+  // live state from the service events; the traffic sparkline and the rate get the bytes
+  // since the previous status, and restart with another tunnel or when disconnected.
+  // NB: the service sends the counters once per second, so a difference is a rate
   const onServiceEvent = useCallback(
     (e: DaemonEvent) => {
       if (e.type === "status_changed") {
         const st = e.data;
         setStatus(st);
         if (st.state === "connected" && st.tunnel_id) {
-          const rx = st.peers.reduce((n, p) => n + p.rx_bytes, 0);
-          const last = lastRx.current;
-          if (last?.tunnel === st.tunnel_id) setSpark((s) => [...s, Math.max(0, rx - last.rx)].slice(-SPARK_LENGTH));
-          else setSpark([]);
-          lastRx.current = { tunnel: st.tunnel_id, rx };
+          const { rx, tx } = sumBytes(st);
+          const last = lastBytes.current;
+          if (last?.tunnel === st.tunnel_id) {
+            const rate = { rx: Math.max(0, rx - last.rx), tx: Math.max(0, tx - last.tx), at: Date.now() / 1000 };
+            // other changes of the same second carry the same counters: not a sample
+            if (rate.rx > 0 || rate.tx > 0) {
+              setSpark((s) => [...s, rate.rx].slice(-SPARK_LENGTH));
+              setRate(rate);
+            }
+          } else {
+            setSpark([]);
+            setRate(null);
+          }
+          lastBytes.current = { tunnel: st.tunnel_id, rx, tx };
         } else {
-          lastRx.current = null;
+          lastBytes.current = null;
           setSpark([]);
+          setRate(null);
         }
       } else if (e.type === "tunnels_changed") setTunnels(e.data);
       else if (e.type === "settings_changed") setSettings(e.data);
@@ -569,7 +581,7 @@ export function App({ connect = connectToService, version, retryMs = 2000, anima
           <Prompt value={input} revision={revision} menuOpen={menuOpen} disabled={running} onChange={onChange} onSubmit={onSubmit} />
         )}
         {menuOpen && <Suggestions items={suggestions} selected={Math.min(selected, suggestions.length - 1)} />}
-        <StatusLine service={service} status={status} tunnels={tunnels} settings={settings} spark={spark} now={now} />
+        <StatusLine service={service} status={status} tunnels={tunnels} settings={settings} spark={spark} rate={rate} now={now} />
       </Box>
     </FrameProvider>
   );

@@ -9,8 +9,9 @@ import { type HeroState, OceanHero } from "../components/OceanHero";
 import { ProtectionBanner } from "../components/ProtectionBanner";
 import { StatusDot } from "../components/Sidebar";
 import { StatCard } from "../components/StatCard";
+import { TrafficChart } from "../components/TrafficChart";
 import { Switch, SwitchText } from "../components/Switch";
-import { formatBytes } from "../format";
+import { formatBytes, formatDuration, formatRate } from "../format";
 import { formatAgo, type Texts } from "../i18n";
 import { useApp, useT } from "../store";
 
@@ -246,25 +247,61 @@ function ConnectError({ t, error, host }: { t: Texts; error: string; host: strin
   );
 }
 
-/** Counters from the daemon's status events (one per second while connected). */
+/**
+ * Live rates, totals and session time from the daemon's status events (one per second
+ * while the counters change), with the throughput chart of the last minute.
+ */
 function LiveStats({ t }: { t: Texts }) {
   const peers = useApp((s) => s.status.peers);
+  const since = useApp((s) => s.status.connected_since);
+  const traffic = useApp((s) => s.traffic);
   const now = useNow();
+
+  // totals of the session and the latest rates; a sample older than 2 s means no traffic
   const rx = peers.reduce((sum, p) => sum + p.rx_bytes, 0);
   const tx = peers.reduce((sum, p) => sum + p.tx_bytes, 0);
+  const latest = traffic[traffic.length - 1];
+  const fresh = latest && latest.time >= now * 1000 - 2000 ? latest : null;
+  const rxRate = formatRate(fresh?.rx ?? 0, t.locale);
+  const txRate = formatRate(fresh?.tx ?? 0, t.locale);
   const handshakes = peers.map((p) => p.last_handshake).filter((h): h is number => h != null);
   const last = handshakes.length > 0 ? Math.max(...handshakes) : null;
 
   return (
-    <div className="stat-grid stagger">
-      <StatCard icon="down" tone="rx" label={t.stats.received} value={formatBytes(rx, t.locale)} />
-      <StatCard icon="up" tone="tx" label={t.stats.sent} value={formatBytes(tx, t.locale)} />
-      <StatCard
-        icon="clock"
-        tone="time"
-        label={t.stats.handshake}
-        value={last == null ? t.stats.never : formatAgo(t, last, now)}
-      />
-    </div>
+    <>
+      <div className="stat-grid stagger">
+        <StatCard
+          icon="down"
+          tone="rx"
+          label={t.stats.received}
+          value={rxRate}
+          detail={t.stats.total(formatBytes(rx, t.locale))}
+        />
+        <StatCard
+          icon="up"
+          tone="tx"
+          label={t.stats.sent}
+          value={txRate}
+          detail={t.stats.total(formatBytes(tx, t.locale))}
+        />
+        <StatCard
+          icon="clock"
+          tone="time"
+          label={t.stats.session}
+          value={since == null ? "–" : formatDuration(now - since)}
+          detail={last == null ? t.stats.noHandshake : t.stats.handshake(formatAgo(t, last, now))}
+        />
+      </div>
+      <div className="traffic-card card">
+        <div className="traffic-head">
+          <span className="stat-label">{t.stats.chart}</span>
+          <span className="traffic-legend" aria-hidden>
+            <span className="tone-rx">↓ {rxRate}</span>
+            <span className="tone-tx">↑ {txRate}</span>
+          </span>
+        </div>
+        <TrafficChart samples={traffic} now={now * 1000} label={t.stats.chartLabel(rxRate, txRate)} />
+      </div>
+    </>
   );
 }

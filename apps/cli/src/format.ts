@@ -37,3 +37,12 @@ export function formatClock(unixMs: number): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
+
+/** Duration in seconds with its two largest units: "45 s", "12 min 05 s", "3 h 07 min". */
+export function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ${pad(s % 60)} s`;
+  return `${Math.floor(s / 3600)} h ${pad(Math.floor(s / 60) % 60)} min`;
+}

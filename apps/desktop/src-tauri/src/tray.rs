@@ -144,9 +144,40 @@ pub fn summary(t: &Texts, s: &Snapshot) -> String {
     }
 }
 
-/// Tooltip of the icon.
+/// Tooltip of the icon: the summary, plus the traffic of the session while connected.
+///
+/// NB: totals and not rates, because the tooltip changes only with the status
+/// events, which stop while no traffic flows: a rate would stay at its last value.
 fn tooltip(t: &Texts, s: &Snapshot) -> String {
-    format!("Submarine: {}", summary(t, s))
+    let summary = summary(t, s);
+    if !s.service_up || s.status.state != ConnectionState::Connected {
+        return format!("Submarine: {summary}");
+    }
+    let rx: u64 = s.status.peers.iter().map(|p| p.rx_bytes).sum();
+    let tx: u64 = s.status.peers.iter().map(|p| p.tx_bytes).sum();
+    format!(
+        "Submarine: {summary}\n↓ {}  ↑ {}",
+        format_bytes(rx, t.decimal),
+        format_bytes(tx, t.decimal)
+    )
+}
+
+/// Formats a byte count like the window does: `1,5 MB` with `decimal` = ",".
+fn format_bytes(bytes: u64, decimal: &str) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1000.0 && unit < UNITS.len() - 1 {
+        value /= 1000.0;
+        unit += 1;
+    }
+    // one decimal digit below 100, as in src/format.ts
+    let text = if unit == 0 || value >= 100.0 {
+        format!("{value:.0}")
+    } else {
+        format!("{value:.1}").replace('.', decimal)
+    };
+    format!("{text} {}", UNITS[unit])
 }
 
 /// Builds the menu: the summary, the tunnels to connect, then disconnect, open
@@ -267,4 +298,18 @@ fn on_menu(app: &AppHandle, id: &str) {
             app.state::<crate::live::Live>().refresh_all(&app);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // units, rounding and the decimal separator of the language
+    #[test]
+    fn bytes_are_formatted_like_the_window() {
+        assert_eq!(format_bytes(999, ","), "999 B");
+        assert_eq!(format_bytes(1_500_000, ","), "1,5 MB");
+        assert_eq!(format_bytes(1_500_000, "."), "1.5 MB");
+        assert_eq!(format_bytes(302_000, "."), "302 KB");
+    }
 }
