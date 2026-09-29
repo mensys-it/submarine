@@ -5,6 +5,7 @@
 import { create } from "zustand";
 
 import { daemon, platform, type Prefs, request, type Settings, type Status, type TunnelInfo } from "./api";
+import { formatClock } from "./format";
 import { type Texts, texts } from "./i18n";
 import { browserLang, type Lang } from "./lang";
 
@@ -17,6 +18,7 @@ const idle: Status = {
   error: null,
   connected_since: null,
   retry_at: null,
+  paused_until: null,
   blocked: false,
   protection_error: null,
 };
@@ -101,6 +103,8 @@ interface AppState {
   saveSettings(settings: Settings): Promise<void>;
   connect(id: string): Promise<void>;
   disconnect(): Promise<void>;
+  /** Disconnects for `seconds` with the kill switch suspended; the daemon then reconnects. */
+  pause(seconds: number): Promise<void>;
   /** Imports a tunnel; rejects so the dialog can show the error. */
   importTunnel(name: string, config: string): Promise<void>;
   /** Returns the name and the configuration with its keys hidden. */
@@ -186,6 +190,8 @@ export const useApp = create<AppState>((set, get) => {
     else if (before.state === "connecting" && next.state === "failed") get().showToast(t().toast.failed(name), "error");
     else if (before.state === "connected" && next.state === "reconnecting") {
       get().showToast(t().toast.reconnecting(name), "error");
+    } else if (before.state !== "paused" && next.state === "paused" && next.paused_until != null) {
+      get().showToast(t().toast.paused(name, formatClock(next.paused_until * 1000, t().locale)));
     }
   };
 
@@ -314,6 +320,8 @@ export const useApp = create<AppState>((set, get) => {
     connect: (id) => run(() => request({ method: "connect", params: { id } }, "ok")),
 
     disconnect: () => run(() => request({ method: "disconnect" }, "ok")),
+
+    pause: (seconds) => run(() => request({ method: "pause", params: { seconds } }, "ok")),
 
     // errors propagate so the import dialog can show them next to the input
     async importTunnel(name, config) {

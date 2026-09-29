@@ -129,6 +129,8 @@ function sceneState(service: Service, status: Status | null): SceneState {
       return { mood: "error", label: "bloccato in superficie", labelColor: palette.red };
     case "reconnecting":
       return { mood: "connecting", label: "di nuovo in immersione…", labelColor: palette.yellow };
+    case "paused":
+      return { mood: "off", label: "in pausa in superficie", labelColor: palette.yellow };
     default:
       return { mood: "off", label: "in superficie", labelColor: palette.dim };
   }

@@ -214,6 +214,15 @@ export function describeStatus(st: Status, list: TunnelInfo[], now = Date.now() 
       if (st.error) out.push(sub(st.error, "faint"));
       out.push(sub("/connect per riprovare"));
       break;
+    case "paused":
+      out.push(head([marks.wait, "yel"], `${name} in pausa`));
+      if (st.paused_until) {
+        const at = formatClock(st.paused_until * 1000).slice(0, 5);
+        out.push(sub(`riprende alle ${at}, tra ${formatDuration(st.paused_until - now)}`));
+      }
+      out.push(sub("kill switch sospeso: il traffico esce senza VPN", "yel"));
+      out.push(sub("/resume per riprendere ora, /disconnect per chiudere"));
+      break;
     case "reconnecting":
       out.push(head([marks.wait, "yel"], `Riconnessione a ${name}`));
       if (st.error) out.push(sub(st.error, "faint"));
@@ -252,6 +261,9 @@ export function describeConnected(t: TunnelInfo, st: Status): Line[] {
 }
 
 /** Kill switch modes by the word typed by the user. */
+/** Durations offered by `/pause` without an argument, in minutes. */
+const pauseMinutes = [5, 15, 60];
+
 const killSwitchValues: Record<string, KillSwitch> = { off: "off", on: "on_connect", always: "always" };
 /** Split tunneling modes, as typed by the user. */
 const splitValues: SplitTunnelMode[] = ["off", "include", "exclude"];
@@ -309,6 +321,48 @@ export const commands: Command[] = [
       // with the `always` kill switch the traffic stays blocked after the disconnect
       if (st.blocked) out.push(sub("il kill switch è sempre attivo: internet resta bloccato finché non ti connetti", "yel"));
       return { lines: out, json: st };
+    },
+  },
+  {
+    name: "pause",
+    usage: "pause <minuti>",
+    description: "disconnetti per un po' col kill switch sospeso, poi riconnetti",
+    async complete(_s, args) {
+      return pauseMinutes.map(String).filter((v) => v.startsWith(args[0] ?? ""));
+    },
+    async run(s, args) {
+      const pause = async (minutes: number): Promise<Outcome> => {
+        await s.client.request({ method: "pause", params: { seconds: minutes * 60 } }, "ok");
+        const [st, list] = await Promise.all([status(s), tunnels(s)]);
+        return { lines: describeStatus(st, list), json: st };
+      };
+      if (args[0]) {
+        const minutes = Number(args[0]);
+        if (!Number.isInteger(minutes) || minutes < 1 || minutes > 24 * 60) {
+          throw new UsageError("Indica i minuti, da 1 a 1440", "per esempio /pause 15");
+        }
+        return pause(minutes);
+      }
+      return needChoice(s, this.usage, {
+        title: "Per quanto mettere in pausa la VPN?",
+        options: pauseMinutes.map((m) => ({ label: m < 60 ? `${m} minuti` : "1 ora", value: String(m) })),
+        choose: (m) => pause(Number(m)),
+      });
+    },
+  },
+  {
+    name: "resume",
+    usage: "resume",
+    description: "riprendi subito la connessione in pausa",
+    busy: "Connessione in corso",
+    async run(s) {
+      const [st, list] = await Promise.all([status(s), tunnels(s)]);
+      const tunnel = list.find((t) => t.id === st.tunnel_id);
+      if (st.state !== "paused" || !tunnel) return { lines: [[[marks.off, "dim"], ["Nessuna connessione in pausa", "fg"]]], json: st };
+      if (s.interactive) return { lines: [], connect: tunnel };
+      await s.client.request({ method: "connect", params: { id: tunnel.id } }, "ok");
+      const after = await status(s);
+      return { lines: after.state === "connected" ? describeConnected(tunnel, after) : describeStatus(after, list), json: after };
     },
   },
   {

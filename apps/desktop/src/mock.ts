@@ -46,6 +46,7 @@ const idle: Status = {
   error: null,
   connected_since: null,
   retry_at: null,
+  paused_until: null,
   blocked: false,
   protection_error: null,
 };
@@ -74,6 +75,8 @@ const blockedWhenIdle = () => settings.kill_switch === "always";
 const handlers = new Set<(event: DaemonEvent) => void>();
 /** Interval updating the traffic counters while connected. */
 let ticker: number | undefined;
+/** End of the pause in progress, if any. */
+let resume: number | undefined;
 
 /** Pushes an event to every subscriber. */
 function emit(event: DaemonEvent) {
@@ -171,6 +174,7 @@ async function handle(req: Request): Promise<Response> {
     case "connect": {
       const id = req.params.id;
       // a slow handshake, then traffic counters that grow every second
+      clearTimeout(resume);
       setStatus({ ...idle, state: "connecting", tunnel_id: id, blocked: settings.kill_switch !== "off" });
       await sleep(1400);
       let rx = 0;
@@ -200,8 +204,22 @@ async function handle(req: Request): Promise<Response> {
       }, 1000);
       return { type: "ok" };
     }
+    case "pause": {
+      // the fake tunnel stops and comes back by itself at the end of the pause
+      const id = status.tunnel_id;
+      if (!id || !["connected", "connecting", "reconnecting", "paused"].includes(status.state)) {
+        throw "there is no connection to pause";
+      }
+      clearInterval(ticker);
+      clearTimeout(resume);
+      const until = Math.floor(Date.now() / 1000) + req.params.seconds;
+      setStatus({ ...idle, state: "paused", tunnel_id: id, paused_until: until });
+      resume = window.setTimeout(() => void handle({ method: "connect", params: { id } }), req.params.seconds * 1000);
+      return { type: "ok" };
+    }
     case "disconnect":
       clearInterval(ticker);
+      clearTimeout(resume);
       setStatus({ ...status, state: "disconnecting" });
       await sleep(500);
       setStatus({ ...idle, blocked: blockedWhenIdle() });

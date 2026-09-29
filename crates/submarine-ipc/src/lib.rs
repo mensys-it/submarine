@@ -51,6 +51,11 @@ pub enum Request {
         id: String,
     },
     Disconnect,
+    /// Disconnects for `seconds` with the kill switch suspended, then connects the
+    /// same tunnel again. `Connect` resumes earlier, `Disconnect` cancels the resume.
+    Pause {
+        seconds: u64,
+    },
     /// Current settings, answered with [`Response::Settings`].
     GetSettings,
     /// Replaces all the settings.
@@ -135,6 +140,9 @@ pub enum ConnectionState {
     /// is being connected again; `Status::retry_at` is set while waiting for the
     /// next attempt. The kill switch keeps blocking meanwhile.
     Reconnecting,
+    /// Disconnected on purpose for a while, kill switch included, until
+    /// `Status::paused_until`; then the tunnel is connected again.
+    Paused,
 }
 
 /// Connection status, sent on request and on every change.
@@ -156,6 +164,8 @@ pub struct Status {
     /// Unix timestamp (seconds) of the next reconnection attempt, while
     /// reconnecting and waiting for it.
     pub retry_at: Option<u64>,
+    /// Unix timestamp (seconds) of when a pause ends, while paused.
+    pub paused_until: Option<u64>,
     /// The kill switch is currently blocking traffic outside the tunnel.
     pub blocked: bool,
     /// Set when the kill switch or split tunneling could not be applied.
@@ -170,7 +180,7 @@ pub enum KillSwitch {
     Off,
     /// Block traffic outside the tunnel while connected, and keep blocking
     /// while a tunnel that stopped working is reconnected, until the user
-    /// disconnects.
+    /// disconnects. A pause suspends it.
     OnConnect,
     /// Block traffic outside the tunnel at all times, even when disconnected.
     Always,

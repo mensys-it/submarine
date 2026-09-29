@@ -1052,6 +1052,10 @@ label:has(input:focus-visible) {
   animation: pulse 1.8s ease-out infinite;
 }
 
+.status-dot[data-state="paused"] {
+  background: var(--amber);
+}
+
 .status-dot[data-state="failed"] {
   background: var(--red);
 }
@@ -1356,6 +1360,10 @@ label:has(input:focus-visible) {
   color: var(--accent);
 }
 
+.hero-status[data-state="paused"] {
+  color: var(--amber-text);
+}
+
 .hero-status[data-state="failed"] {
   color: var(--red-text);
 }
@@ -1424,8 +1432,14 @@ label:has(input:focus-visible) {
 
 .hero-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-3);
   margin-top: var(--space-2);
+}
+
+/* With the pause durations open the row wraps, instead of squeezing the icons away. */
+.hero-actions > * {
+  flex-shrink: 0;
 }
 
 .hero-button {
@@ -1441,7 +1455,8 @@ label:has(input:focus-visible) {
   color: var(--accent-ink);
 }
 
-.hero-button[data-state="disconnected"] {
+.hero-button[data-state="disconnected"],
+.hero-button[data-state="paused"] {
   box-shadow: 0 10px 30px var(--accent-glow);
 }
 
@@ -1462,6 +1477,40 @@ label:has(input:focus-visible) {
 
 .hero-button:disabled {
   opacity: 0.7;
+}
+
+/* Pause: a quiet companion of the main button, opening a row of durations. */
+.hero-pause,
+.pause-option {
+  gap: var(--space-2);
+  min-height: 52px;
+  padding: 0 22px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(10, 20, 36, 0.45);
+  color: var(--text-soft);
+  backdrop-filter: blur(6px);
+}
+
+.hero-pause[aria-expanded="true"] {
+  border-color: rgba(245, 200, 122, 0.6);
+  color: var(--amber-ink);
+}
+
+.pause-options {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pause-option {
+  padding: 0 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pause-option:hover,
+.hero-pause:hover {
+  color: var(--text-strong);
 }
 
 .spin {

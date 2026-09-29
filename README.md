@@ -61,6 +61,8 @@ submarine killswitch on
   resolving the server name again. With the kill switch, traffic stays blocked meanwhile.
 - **Desktop app and CLI.** A Tauri app with tray icon and an Ink prompt with completion,
   history and scriptable commands.
+- **Pause.** Disconnects for 5 minutes, 15 minutes or an hour, kill switch included, then
+  connects again by itself; from the window, the tray menu or `submarine pause 15`.
 - **Live traffic.** Download and upload rates, a chart of the last minute and the session
   time in the app; rates, a sparkline and the session time in the CLI status line.
 - **Standard configuration.** Plain wg-quick `.conf` files, imported as they are.
@@ -94,8 +96,8 @@ submarine connect office
 ## CLI
 
 `submarine` without arguments opens an interactive prompt: `/` commands (`/connect`,
-`/status`, `/killswitch`, `/log`, `/split`, `/apps`, ...), a completion menu (Tab, arrows,
-Esc), history, the connection followed step by step and the state always visible. The
+`/status`, `/pause`, `/killswitch`, `/log`, `/split`, `/apps`, ...), a completion menu (Tab,
+arrows, Esc), history, the connection followed step by step and the state always visible. The
 animated ocean in the header follows the state of the service. With `NO_COLOR` or outside a
 terminal there are no animations; in a narrow or short terminal a single wave line remains.
 
@@ -105,6 +107,7 @@ With a command it runs and exits, for scripts:
 submarine connect office           # tunnel name, even partial
 submarine status --json
 submarine killswitch on            # changes only that field of the settings
+submarine pause 15                 # 15 minutes without VPN, then it reconnects (or `resume`)
 submarine apps add "C:\Program Files\Mozilla Firefox\firefox.exe"
 ```
 

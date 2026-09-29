@@ -56,6 +56,8 @@ export class FakeDaemon {
   private generation = 0;
   /** Timer of the statistics while connected. */
   private stats: ReturnType<typeof setInterval> | undefined;
+  /** End of the pause in progress, which connects the tunnel again. */
+  private resume: ReturnType<typeof setTimeout> | undefined;
   private server = net.createServer((socket) => this.serve(socket));
   /** Connected clients, which receive the events. */
   private sockets = new Set<net.Socket>();
@@ -74,6 +76,7 @@ export class FakeDaemon {
   /** Stops the connection in progress and the statistics, and closes every client. */
   async stop() {
     clearInterval(this.stats);
+    clearTimeout(this.resume);
     this.generation++;
     for (const s of this.sockets) s.destroy();
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
@@ -189,10 +192,25 @@ export class FakeDaemon {
         this.emit({ type: "settings_changed", data: this.settings });
         return { type: "settings", data: this.settings };
       case "connect":
+        clearTimeout(this.resume);
         await this.connect(req.params.id);
         return { type: "ok" };
+      case "pause": {
+        const id = this.status.tunnel_id;
+        if (!id || !["connecting", "connected", "reconnecting", "paused"].includes(this.status.state)) {
+          throw new Error("there is no connection to pause");
+        }
+        clearInterval(this.stats);
+        clearTimeout(this.resume);
+        this.generation++;
+        const until = Math.floor(Date.now() / 1000) + req.params.seconds;
+        this.setStatus({ ...idle, state: "paused", tunnel_id: id, paused_until: until });
+        this.resume = setTimeout(() => void this.connect(id), req.params.seconds * 1000);
+        return { type: "ok" };
+      }
       case "disconnect":
         clearInterval(this.stats);
+        clearTimeout(this.resume);
         this.generation++;
         if (this.status.state !== "disconnected") this.log("info", "tunnel stopped name=submarine0");
         this.setStatus({ ...idle });

@@ -62,6 +62,8 @@ submarine killswitch on
   frattempo.
 - **App desktop e CLI.** Un'app Tauri con icona nella tray e un prompt Ink con completamento,
   cronologia e comandi da script.
+- **Pausa.** Disconnette per 5 minuti, 15 minuti o un'ora, kill switch compreso, poi si
+  riconnette da sola; dalla finestra, dal menu della tray o con `submarine pause 15`.
 - **Traffico in tempo reale.** Velocità di ricezione e invio, un grafico dell'ultimo minuto e
   la durata della sessione nell'app; velocità, sparkline e durata nella riga di stato della CLI.
 - **Configurazione standard.** File `.conf` wg-quick, importati così come sono.
@@ -95,10 +97,10 @@ submarine connect ufficio
 ## CLI
 
 `submarine` senza argomenti apre un prompt interattivo: comandi con `/` (`/connect`,
-`/status`, `/killswitch`, `/log`, `/split`, `/apps`, ...), menu di completamento (Tab, frecce,
-Esc), cronologia, la connessione seguita passo per passo e lo stato sempre visibile. L'oceano
-animato nell'intestazione segue lo stato del servizio. Con `NO_COLOR` o fuori da un terminale
-niente animazioni; in un terminale stretto o basso resta una riga d'onda.
+`/status`, `/pause`, `/killswitch`, `/log`, `/split`, `/apps`, ...), menu di completamento (Tab,
+frecce, Esc), cronologia, la connessione seguita passo per passo e lo stato sempre visibile.
+L'oceano animato nell'intestazione segue lo stato del servizio. Con `NO_COLOR` o fuori da un
+terminale niente animazioni; in un terminale stretto o basso resta una riga d'onda.
 
 Con un comando esegue ed esce, per gli script:
 
@@ -106,6 +108,7 @@ Con un comando esegue ed esce, per gli script:
 submarine connect ufficio          # nome del tunnel, anche parziale
 submarine status --json
 submarine killswitch on            # modifica solo quel campo delle impostazioni
+submarine pause 15                 # 15 minuti senza VPN, poi si riconnette (o `resume`)
 submarine apps add "C:\Program Files\Mozilla Firefox\firefox.exe"
 ```
 

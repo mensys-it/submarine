@@ -11,7 +11,7 @@ import { StatusDot } from "../components/Sidebar";
 import { StatCard } from "../components/StatCard";
 import { TrafficChart } from "../components/TrafficChart";
 import { Switch, SwitchText } from "../components/Switch";
-import { formatBytes, formatDuration, formatRate } from "../format";
+import { formatBytes, formatClock, formatDuration, formatRate } from "../format";
 import { formatAgo, type Texts } from "../i18n";
 import { useApp, useT } from "../store";
 
@@ -21,6 +21,7 @@ const heroStates: Record<ConnectionState, HeroState> = {
   disconnecting: "off",
   connecting: "connecting",
   reconnecting: "connecting",
+  paused: "off",
   connected: "on",
   failed: "error",
 };
@@ -53,6 +54,7 @@ export function TunnelView({ tunnel }: { tunnel: TunnelInfo }) {
     settings,
     connect,
     disconnect,
+    pause,
     deleteTunnel,
     importWarnings,
     warningsFrom,
@@ -78,8 +80,14 @@ export function TunnelView({ tunnel }: { tunnel: TunnelInfo }) {
   const retryIn = status.retry_at == null ? null : Math.max(0, Math.ceil(status.retry_at - now));
 
   // second line of the hero, depending on the scene
+  const pausedUntil = state === "paused" ? status.paused_until : null;
   const subline = {
-    off: state === "disconnecting" ? t.hero.disconnecting : t.hero.off,
+    off:
+      pausedUntil != null
+        ? t.hero.paused(formatClock(pausedUntil * 1000, t.locale), formatDuration(pausedUntil - now))
+        : state === "disconnecting"
+          ? t.hero.disconnecting
+          : t.hero.off,
     connecting: state === "reconnecting" ? t.hero.reconnecting(retryIn) : t.hero.connecting(host),
     on: tunnel.full_tunnel ? t.hero.onFull : t.hero.onSplit,
     error: t.hero.error,
@@ -103,6 +111,12 @@ export function TunnelView({ tunnel }: { tunnel: TunnelInfo }) {
             onConnect={() => connect(tunnel.id)}
             onDisconnect={disconnect}
           />
+          {state === "connected" && <PauseControl t={t} onPause={pause} />}
+          {state === "paused" && (
+            <button type="button" className="hero-pause btn" onClick={disconnect}>
+              {t.hero.disconnect}
+            </button>
+          )}
         </div>
         {otherActive && <p className="hero-note">{t.hero.otherActive}</p>}
       </OceanHero>
@@ -190,6 +204,48 @@ export function TunnelView({ tunnel }: { tunnel: TunnelInfo }) {
   );
 }
 
+/** Durations offered for a pause, in minutes. */
+const PAUSE_MINUTES = [5, 15, 60];
+
+/**
+ * The pause button next to the main one: a click shows the durations, a second click on
+ * the button (or a choice) hides them again.
+ */
+function PauseControl({ t, onPause }: { t: Texts; onPause(seconds: number): void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className="hero-pause btn"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        title={t.hero.pauseFor}
+      >
+        <Icon name="pause" strokeWidth={2.2} />
+        {t.hero.pause}
+      </button>
+      {open && (
+        <div className="pause-options view-in" role="group" aria-label={t.hero.pauseFor}>
+          {PAUSE_MINUTES.map((minutes) => (
+            <button
+              key={minutes}
+              type="button"
+              className="pause-option btn"
+              onClick={() => {
+                setOpen(false);
+                onPause(minutes * 60);
+              }}
+            >
+              {t.hero.pauseOption(minutes)}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 /** Props of MainButton. */
 interface MainButtonProps {
   t: Texts;
@@ -211,6 +267,7 @@ function MainButton({ t, state, onConnect, onDisconnect }: MainButtonProps) {
     disconnecting: t.hero.disconnectingButton,
     failed: t.hero.retry,
     reconnecting: t.hero.disconnect,
+    paused: t.hero.resume,
   }[state];
   const stop = state === "connected" || connecting;
   return (

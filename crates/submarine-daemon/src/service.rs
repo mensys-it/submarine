@@ -13,7 +13,8 @@
 //! A tunnel the user wants connected is kept working: when it fails, or its
 //! server stops answering the handshakes, it is torn down and connected again
 //! (resolving the endpoint hostnames again) with growing delays between the
-//! attempts.
+//! attempts. A pause disconnects it on purpose for a while, kill switch
+//! included, and then connects it again the same way.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -55,14 +56,16 @@ const RETRY_DELAYS: [Duration; 6] = [
     Duration::from_secs(30),
     Duration::from_secs(60),
 ];
+/// Longest pause accepted.
+const MAX_PAUSE: Duration = Duration::from_secs(24 * 3600);
 
 /// Who started a connection attempt, which decides what a failure does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Attempt {
     /// The user: a failure ends in the `Failed` state.
     User,
-    /// The service itself, at startup or after the tunnel stopped working: a
-    /// failure schedules another attempt.
+    /// The service itself, at startup, after the tunnel stopped working or at
+    /// the end of a pause: a failure schedules another attempt.
     Retry,
 }
 
@@ -235,6 +238,10 @@ impl Service {
                 self.disconnect().await;
                 Ok(Response::Ok)
             }
+            Request::Pause { seconds } => self
+                .pause(Duration::from_secs(seconds))
+                .await
+                .map(|()| Response::Ok),
             Request::GetLogs => Ok(Response::Logs(crate::logbuf::snapshot())),
             Request::ClearLogs => {
                 crate::logbuf::clear();
@@ -273,7 +280,8 @@ impl Service {
         self.notify_tunnels();
 
         // a tunnel in use picks up the new configuration right away; a rename
-        // alone does not need a reconnect
+        // alone does not need a reconnect, and a paused tunnel picks it up at
+        // the end of the pause
         let in_use = {
             let inner = self.inner.lock().await;
             inner.status.tunnel_id.as_deref() == Some(id)
@@ -353,7 +361,7 @@ impl Service {
     ///
     /// `attempt` decides what a failure does (see [`Attempt`]). `expected` is
     /// the generation a scheduled attempt was planned in: the attempt is
-    /// dropped if the user connected or disconnected since.
+    /// dropped if the user connected, disconnected or paused since.
     ///
     /// Returns Ok also when the attempt is cancelled by a later connect or
     /// disconnect: the caller asked for something that no longer applies.
@@ -527,10 +535,71 @@ impl Service {
         self.sync_protection(&mut inner).await;
     }
 
+    /// Disconnects the tunnel for `duration` with the kill switch suspended,
+    /// then connects it again. The tunnel the user left connected is NOT
+    /// forgotten: if the service restarts meanwhile, it reconnects right away.
+    ///
+    /// # Errors
+    /// When no connection is up or being made, or `duration` is out of range.
+    async fn pause(self: &Arc<Self>, duration: Duration) -> Result<()> {
+        if duration.is_zero() || duration > MAX_PAUSE {
+            return Err(format!(
+                "a pause lasts from 1 second to {} hours",
+                MAX_PAUSE.as_secs() / 3600
+            ));
+        }
+        let mut inner = self.inner.lock().await;
+        // only a tunnel the user wants connected can be paused; pausing again
+        // replaces the end of the pause
+        let id = match inner.status.state {
+            ConnectionState::Connecting
+            | ConnectionState::Connected
+            | ConnectionState::Reconnecting
+            | ConnectionState::Paused => inner.status.tunnel_id.clone(),
+            _ => None,
+        };
+        let Some(id) = id else {
+            return Err("there is no connection to pause".into());
+        };
+
+        // teardown, as for a disconnect
+        inner.generation += 1;
+        inner.retries = 0;
+        inner.resolving = false;
+        inner.endpoints.clear();
+        if let Some(active) = inner.active.take() {
+            self.set_status(
+                &mut inner,
+                Status {
+                    state: ConnectionState::Disconnecting,
+                    tunnel_id: Some(id.clone()),
+                    ..Status::default()
+                },
+            );
+            teardown(active).await;
+        }
+        tracing::info!(%id, seconds = duration.as_secs(), "connection paused");
+        self.set_status(
+            &mut inner,
+            Status {
+                state: ConnectionState::Paused,
+                tunnel_id: Some(id.clone()),
+                paused_until: Some(unix_now() + duration.as_secs()),
+                ..Status::default()
+            },
+        );
+        self.sync_protection(&mut inner).await;
+
+        // the resume is dropped if the user connects, disconnects or pauses again
+        let generation = inner.generation;
+        self.spawn_retry(id, duration, generation);
+        Ok(())
+    }
+
     /// Tears down what is left of the tunnel and schedules another attempt to
     /// connect `id`, after a delay that grows with each consecutive retry. The
     /// status stays `Reconnecting`, and the kill switch keeps blocking, until
-    /// an attempt succeeds or the user connects or disconnects.
+    /// an attempt succeeds or the user connects, disconnects or pauses.
     async fn schedule_retry(self: &Arc<Self>, inner: &mut Inner, id: &str, reason: String) {
         if let Some(active) = inner.active.take() {
             teardown(active).await;
@@ -665,6 +734,8 @@ impl Service {
         // whether the kill switch blocks traffic outside the tunnel right now
         let state = inner.status.state;
         let block = match inner.settings.kill_switch {
+            // a pause suspends the kill switch on purpose
+            _ if state == ConnectionState::Paused => false,
             KillSwitch::Off => false,
             KillSwitch::OnConnect => matches!(
                 state,

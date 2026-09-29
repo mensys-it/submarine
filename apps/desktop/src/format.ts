@@ -36,6 +36,11 @@ export function formatDuration(seconds: number): string {
   return `${Math.floor(s / 3600)} h ${pad(Math.floor(s / 60) % 60)} min`;
 }
 
+/** Formats a Unix time in milliseconds as a local time of day, hours and minutes only. */
+export function formatClock(ms: number, locale: string): string {
+  return new Date(ms).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+}
+
 /** Formats a Unix time in milliseconds as a local time of day with seconds. */
 export function formatTime(ms: number, locale: string): string {
   return new Date(ms).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" });

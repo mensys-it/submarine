@@ -7,7 +7,7 @@
 
 use submarine_ipc::{ConnectionState, Request};
 use tauri::image::Image;
-use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Wry};
 
@@ -24,6 +24,8 @@ const ICON_IDLE: &[u8] = include_bytes!("../icons/tray/idle.png");
 const ICON_CONNECTED: &[u8] = include_bytes!("../icons/tray/connected.png");
 /// Icon when the kill switch blocks the traffic, whatever the state.
 const ICON_BLOCKED: &[u8] = include_bytes!("../icons/tray/blocked.png");
+/// Durations of the pause submenu, in seconds, in the order of `Texts::pause_options`.
+const PAUSE_SECONDS: [u64; 3] = [5 * 60, 15 * 60, 3600];
 
 /// What the menu shows; the menu is rebuilt only when this changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,6 +137,7 @@ pub fn summary(t: &Texts, s: &Snapshot) -> String {
         ConnectionState::Disconnecting => t.disconnecting.into(),
         ConnectionState::Failed => with_name(t.failed),
         ConnectionState::Reconnecting => with_name(t.reconnecting),
+        ConnectionState::Paused => with_name(t.paused),
         ConnectionState::Disconnected => t.disconnected.into(),
     };
     if s.status.blocked {
@@ -226,8 +229,29 @@ fn menu(app: &AppHandle, t: &Texts, s: &Snapshot) -> tauri::Result<Menu<Wry>> {
         )?));
     }
 
-    // disconnect, also to lift the block that the kill switch keeps after a drop
+    // pause while connected, resume while paused
     items.push(Box::new(PredefinedMenuItem::separator(app)?));
+    if s.service_up && s.status.state == ConnectionState::Connected {
+        let options = PAUSE_SECONDS
+            .iter()
+            .zip(t.pause_options)
+            .map(|(seconds, label)| {
+                MenuItem::with_id(app, format!("pause:{seconds}"), label, true, None::<&str>)
+            })
+            .collect::<tauri::Result<Vec<_>>>()?;
+        let refs: Vec<&dyn IsMenuItem<Wry>> = options.iter().map(|i| i as _).collect();
+        items.push(Box::new(Submenu::with_items(app, t.pause, true, &refs)?));
+    } else if s.service_up && s.status.state == ConnectionState::Paused {
+        items.push(Box::new(MenuItem::with_id(
+            app,
+            "resume",
+            t.resume,
+            true,
+            None::<&str>,
+        )?));
+    }
+
+    // disconnect, also to lift the block that the kill switch keeps after a drop
     let can_disconnect = s.service_up
         && (s.status.state != ConnectionState::Disconnected
             || s.status.blocked && s.status.tunnel_id.is_some());
@@ -273,6 +297,15 @@ fn on_menu(app: &AppHandle, id: &str) {
         // goes through the exit handler in lib.rs, which may disconnect first
         "quit" => return app.exit(0),
         "disconnect" => Request::Disconnect,
+        // the paused tunnel is connected again right away
+        "resume" => match app.state::<crate::live::Live>().get().status.tunnel_id {
+            Some(id) => Request::Connect { id },
+            None => return,
+        },
+        _ if id.starts_with("pause:") => match id["pause:".len()..].parse() {
+            Ok(seconds) => Request::Pause { seconds },
+            Err(_) => return,
+        },
         _ => match id.strip_prefix("connect:") {
             Some(tunnel) => {
                 let snapshot = app.state::<crate::live::Live>().get();

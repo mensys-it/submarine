@@ -83,6 +83,11 @@ export function StatusLine({ service, status, tunnels, settings, spark, rate, no
       case "failed":
         left = [["✗ ", "red"], ["Connessione interrotta", "fg"], ["  /connect per riprovare", "dim"]];
         break;
+      case "paused":
+        left = [["‖ ", "yel"], [`${name} in pausa`, "fg"]];
+        if (status.paused_until) left.push([`  riprende tra ${formatDuration(status.paused_until - now)}`, "dim"]);
+        left.push(["  kill switch sospeso", "yel"]);
+        break;
       case "reconnecting":
         left = [[spin, "yel"], [`Riconnessione a ${name}…`, "fg"]];
         if (status.retry_at) left.push([`  nuovo tentativo tra ${retryIn(status.retry_at, now)} s`, "dim"]);

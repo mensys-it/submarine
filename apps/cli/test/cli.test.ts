@@ -113,6 +113,29 @@ describe("commands", () => {
     ]);
   });
 
+  // a pause stops the tunnel with the kill switch suspended, a resume connects it again
+  test("pause and resume", async () => {
+    await run("connect", ["lab"]);
+    const paused = await run("pause", ["15"]);
+    expect(daemon.requests).toContainEqual({ method: "pause", params: { seconds: 900 } });
+    const lines = paused.lines.map(plain);
+    expect(lines[0]).toBe("◌ Laboratorio in pausa");
+    expect(lines[1]).toMatch(/^ {2}⎿ riprende alle \d\d:\d\d, tra 1[45] min \d\d s$/);
+    expect(lines).toContain("  ⎿ kill switch sospeso: il traffico esce senza VPN");
+    const resumed = await run("resume");
+    expect(plain(resumed.lines[0])).toBe("● Connesso a Laboratorio");
+    const nothing = await run("resume");
+    expect(plain(nothing.lines[0])).toBe("○ Nessuna connessione in pausa");
+  });
+
+  // a pause needs a whole number of minutes, at most one day
+  test("pause rejects wrong durations", async () => {
+    await run("connect", ["lab"]);
+    await expect(run("pause", ["0"])).rejects.toBeInstanceOf(UsageError);
+    await expect(run("pause", ["abc"])).rejects.toBeInstanceOf(UsageError);
+    await expect(run("pause")).rejects.toBeInstanceOf(UsageError);
+  });
+
   // in interactive mode the command only hands the tunnel to the prompt
   test("interactive connect is left to the prompt, which follows the steps", async () => {
     const outcome = await run("connect", ["lab"], { client, interactive: true, yes: false });
