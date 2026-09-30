@@ -138,7 +138,9 @@ pub enum ConnectionState {
     Failed,
     /// The tunnel stopped working (it failed or the server stopped answering) and
     /// is being connected again; `Status::retry_at` is set while waiting for the
-    /// next attempt. The kill switch keeps blocking meanwhile.
+    /// next attempt. The tunnel of such an attempt stays in this state, with its
+    /// interface up, until the first handshake. The kill switch keeps blocking
+    /// meanwhile.
     Reconnecting,
     /// Disconnected on purpose for a while, kill switch included, until
     /// `Status::paused_until`; then the tunnel is connected again.

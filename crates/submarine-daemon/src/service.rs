@@ -453,11 +453,15 @@ impl Service {
         }
         inner.resolving = false;
         match result {
-            // success: start of the monitor and `Connected` status
+            // success: start of the monitor and `Connected` status. A retry after a
+            // tunnel that stopped working stays `Reconnecting` until a handshake
+            // proves that the server answers again (see `monitor`): with the server
+            // still down the interface comes up anyway, and the state would flap
+            // between connected and reconnecting at every attempt
             Ok((tunnel, net, routes, dns)) => {
                 let (stop_tx, stop_rx) = oneshot::channel();
                 tokio::spawn(self.clone().monitor(generation, tunnel.failure(), stop_rx));
-                let status = Status {
+                let mut status = Status {
                     state: ConnectionState::Connected,
                     tunnel_id: Some(id.to_owned()),
                     interface: Some(tunnel.interface_name().to_owned()),
@@ -465,6 +469,11 @@ impl Service {
                     connected_since: Some(unix_now()),
                     ..Status::default()
                 };
+                if attempt == Attempt::Retry && inner.retries > 0 {
+                    status.state = ConnectionState::Reconnecting;
+                    status.error = inner.status.error.clone();
+                    status.connected_since = None;
+                }
                 let mut active = Active {
                     generation,
                     tunnel,
@@ -693,15 +702,30 @@ impl Service {
                         self.schedule_retry(&mut inner, &id, reason).await;
                         return;
                     }
-                    // a completed handshake proves that the tunnel works again
-                    if stats.iter().any(|s| s.last_handshake.is_some()) {
+                    // a completed handshake proves that the tunnel works again: a
+                    // reconnected tunnel becomes `Connected` only then. Without any
+                    // endpoint there is no handshake to wait for
+                    let proven = stats.iter().any(|s| s.last_handshake.is_some())
+                        || stats.iter().all(|s| s.endpoint.is_none());
+                    let mut status = inner.status.clone();
+                    let promoted = proven && status.state == ConnectionState::Reconnecting;
+                    if proven {
                         inner.retries = 0;
+                    }
+                    if promoted {
+                        tracing::info!("tunnel working again");
+                        status.state = ConnectionState::Connected;
+                        status.error = None;
+                        status.connected_since = Some(unix_now());
                     }
 
                     // refresh of the peer statistics and check for a network change
-                    let mut status = inner.status.clone();
                     status.peers = peer_status(stats);
                     self.set_status(&mut inner, status);
+                    // the kill switch reports the traffic as blocked until connected
+                    if promoted {
+                        self.sync_protection(&mut inner).await;
+                    }
                     let inner = &mut *inner;
                     follow_network_change(inner.active.as_mut().expect("checked above"), &mut inner.split).await;
                 }
