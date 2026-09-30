@@ -142,12 +142,16 @@ async fn up(path: &str, name: Option<String>) -> Result<(), Box<dyn std::error::
     }
     .await;
 
-    // restore of the system, ALWAYS, even if applying failed half-way
+    // restore of the system, ALWAYS, even if applying failed half-way: both resets
+    // run whatever the other one does, and the first error of the run wins over theirs
     // NB: the interface is removed only after routes and DNS are reset
-    dns.reset().await?;
-    routes.reset().await?;
+    let dns_reset = dns.reset().await;
+    let routes_reset = routes.reset().await;
     drop(tunnel);
-    result
+    result?;
+    dns_reset?;
+    routes_reset?;
+    Ok(())
 }
 
 /// Waits for Ctrl+C or a tunnel failure, logging the peer statistics every five
