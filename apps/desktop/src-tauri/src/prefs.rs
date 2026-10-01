@@ -104,14 +104,33 @@ pub fn get_prefs(app: AppHandle) -> PrefsView {
     view(&app)
 }
 
+/// Writes `prefs` to the preferences file, creating its directory if needed.
+fn save(app: &AppHandle, prefs: &Prefs) -> Result<(), String> {
+    let Some(path) = path(app) else {
+        return Ok(());
+    };
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let data = serde_json::to_vec_pretty(prefs).map_err(|e| e.to_string())?;
+    std::fs::write(path, data).map_err(|e| e.to_string())
+}
+
 /// Tauri command saving the preferences and applying them; returns them as
 /// now in effect.
 ///
+/// Either everything changes or nothing does: the file is written first, and
+/// restored if the launch at login then cannot be changed.
+///
 /// # Errors
 ///
-/// Fails if the launch at login cannot be changed or the file cannot be written.
+/// Fails if the file cannot be written or the launch at login cannot be changed.
 #[tauri::command]
 pub fn set_prefs(app: AppHandle, prefs: PrefsView) -> Result<PrefsView, String> {
+    // file first, so a write error leaves both the file and the OS as they were
+    let previous = app.state::<PrefsState>().get();
+    save(&app, &prefs.prefs)?;
+
     // launch at login, changed in the OS only if it differs
     let autolaunch = app.autolaunch();
     if prefs.launch_at_login != autolaunch.is_enabled().unwrap_or(false) {
@@ -120,16 +139,15 @@ pub fn set_prefs(app: AppHandle, prefs: PrefsView) -> Result<PrefsView, String> 
         } else {
             autolaunch.disable()
         };
-        result.map_err(|e| e.to_string())?;
-    }
-    // file first, so the state changes only if it was saved
-    if let Some(path) = path(&app) {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        if let Err(err) = result {
+            // the old file back, so it still matches the state in memory
+            if let Err(restore) = save(&app, &previous) {
+                tracing::warn!("cannot restore the preferences file: {restore}");
+            }
+            return Err(err.to_string());
         }
-        let data = serde_json::to_vec_pretty(&prefs.prefs).map_err(|e| e.to_string())?;
-        std::fs::write(path, data).map_err(|e| e.to_string())?;
     }
+
     *app.state::<PrefsState>().0.lock().unwrap() = prefs.prefs;
     // the tray texts may have changed language
     app.state::<crate::live::Live>().refresh_all(&app);
