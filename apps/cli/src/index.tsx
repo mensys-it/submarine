@@ -64,6 +64,12 @@ async function runOnce(argv: string[]): Promise<number> {
   const [name, ...args] = argv.filter((a) => !["--json", "--yes", "-y"].includes(a));
   const color = process.stdout.isTTY && !process.env.NO_COLOR;
 
+  // only flags, e.g. `submarine --json`: there is no command to run
+  if (name === undefined) {
+    console.error(`Manca il comando.\n\n${HELP}`);
+    return 2;
+  }
+
   // commands of the interactive prompt only are unknown here
   const command = findCommand(name);
   if (!command || command.interactiveOnly) {

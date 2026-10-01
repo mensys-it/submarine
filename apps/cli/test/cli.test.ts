@@ -210,6 +210,13 @@ describe("commands", () => {
   });
 });
 
+// flags without a command are a usage error, not a crash
+test("flags alone exit with the usage code", () => {
+  const cli = Bun.spawnSync([process.execPath, path.join(import.meta.dir, "../src/index.tsx"), "--json"], { stdin: "ignore" });
+  expect(cli.exitCode).toBe(2);
+  expect(cli.stderr.toString()).toContain("Manca il comando.");
+});
+
 // byte counts in the Italian locale, relative times and session durations
 test("formatting", () => {
   expect(formatBytes(1_234_000)).toBe("1,2 MB");
