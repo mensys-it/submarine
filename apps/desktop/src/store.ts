@@ -21,6 +21,7 @@ const idle: Status = {
   paused_until: null,
   blocked: false,
   protection_error: null,
+  wifi: null,
 };
 
 /** Settings shown until the daemon sends its own. */
@@ -31,6 +32,9 @@ export const defaultSettings: Settings = {
   split_apps: [],
   prefer_tunnel: false,
   auto_connect: null,
+  untrusted_tunnel: null,
+  trusted_networks: [],
+  disconnect_on_trusted: false,
 };
 
 /** Page shown in the main area; "tunnel" is the selected tunnel. */

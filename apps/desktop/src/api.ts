@@ -50,6 +50,8 @@ export interface Status {
   blocked: boolean;
   /** Why the kill switch or split tunneling could not be applied, if they could not. */
   protection_error: string | null;
+  /** Wi-Fi network the computer is on, if any and if the service can read it. */
+  wifi: string | null;
 }
 
 /** When the kill switch blocks traffic outside the tunnel. */
@@ -76,6 +78,12 @@ export interface Settings {
   prefer_tunnel: boolean;
   /** Tunnel id to connect when the service starts. */
   auto_connect: string | null;
+  /** Tunnel connected on joining a Wi-Fi network that is not trusted; null: none. */
+  untrusted_tunnel: string | null;
+  /** Names (SSIDs) of the trusted Wi-Fi networks. */
+  trusted_networks: string[];
+  /** Joining a trusted Wi-Fi network disconnects the VPN. */
+  disconnect_on_trusted: boolean;
 }
 
 /** One line of the daemon log. */

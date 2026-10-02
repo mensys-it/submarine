@@ -28,6 +28,7 @@ Comandi:
   disconnect                        disconnetti
   pause <minuti>                    disconnetti per un po', poi riconnetti da solo
   resume                            riprendi subito la connessione in pausa
+  wifi [trust|untrust|auto|disconnect]  reti Wi-Fi fidate e connessione automatica
   import <file.conf> [nome]         importa una configurazione WireGuard
   delete <tunnel> --yes             elimina un tunnel
   killswitch <off|on|always>        kill switch

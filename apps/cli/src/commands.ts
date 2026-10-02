@@ -233,6 +233,7 @@ export function describeStatus(st: Status, list: TunnelInfo[], now = Date.now() 
       out.push(head([marks.off, "dim"], "Non connesso"));
   }
   // protection state, whatever the connection state
+  if (st.wifi) out.push(sub(`rete Wi-Fi “${st.wifi}”`, "dim"));
   if (st.blocked) out.push(sub("il kill switch sta bloccando il traffico fuori dal tunnel", "yel"));
   if (st.protection_error) out.push(head([marks.fail, "red"], "Protezione non attiva"), sub(st.protection_error, "faint"));
   return out;
@@ -261,6 +262,26 @@ export function describeConnected(t: TunnelInfo, st: Status): Line[] {
 }
 
 /** Kill switch modes by the word typed by the user. */
+/** Subcommands of `/wifi`, for the completion. */
+const wifiActions = ["trust", "untrust", "auto", "disconnect"];
+
+/** The Wi-Fi network in use and the trusted networks rules. */
+function describeWifi(cfg: Settings, st: Status, list: TunnelInfo[]): Line[] {
+  const trusted = cfg.trusted_networks ?? [];
+  const out: Line[] = [];
+  if (st.wifi) {
+    const isTrusted = trusted.includes(st.wifi);
+    out.push(head([marks.on, isTrusted ? "acc" : "yel"], `Rete Wi-Fi “${st.wifi}”`, [isTrusted ? "  fidata" : "  non fidata", "dim"]));
+  } else {
+    out.push(head([marks.off, "dim"], "Nessuna rete Wi-Fi rilevata"));
+  }
+  const tunnel = list.find((t) => t.id === cfg.untrusted_tunnel);
+  out.push(sub(tunnel ? `sulle reti non fidate si connette a ${tunnel.name}` : "sulle reti non fidate non si connette da solo"));
+  out.push(sub(cfg.disconnect_on_trusted ? "sulle reti fidate si disconnette" : "sulle reti fidate non si disconnette"));
+  out.push(sub(trusted.length ? `reti fidate: ${trusted.join(", ")}` : "nessuna rete fidata"));
+  return out;
+}
+
 /** Durations offered by `/pause` without an argument, in minutes. */
 const pauseMinutes = [5, 15, 60];
 
@@ -363,6 +384,59 @@ export const commands: Command[] = [
       await s.client.request({ method: "connect", params: { id: tunnel.id } }, "ok");
       const after = await status(s);
       return { lines: after.state === "connected" ? describeConnected(tunnel, after) : describeStatus(after, list), json: after };
+    },
+  },
+  {
+    name: "wifi",
+    usage: "wifi [trust [rete] | untrust <rete> | auto <tunnel|off> | disconnect <on|off>]",
+    description: "reti Wi-Fi fidate: connessione automatica sulle altre",
+    async complete(s, args) {
+      if (args.length <= 1) return wifiActions.filter((v) => v.startsWith(args[0] ?? ""));
+      const rest = args.slice(1).join(" ").toLowerCase();
+      const options =
+        args[0] === "untrust"
+          ? ((await settings(s)).trusted_networks ?? [])
+          : args[0] === "auto"
+            ? ["off", ...(await tunnels(s)).map((t) => t.name)]
+            : args[0] === "disconnect"
+              ? ["on", "off"]
+              : [];
+      return options.filter((o) => o.toLowerCase().startsWith(rest)).map((o) => `${args[0]} ${o}`);
+    },
+    async run(s, args) {
+      const [action, ...rest] = args;
+      const target = joinArgs(rest);
+      const [cfg, st, list] = await Promise.all([settings(s), status(s), tunnels(s)]);
+      const trusted = cfg.trusted_networks ?? [];
+      const save = async (patch: Partial<Settings>) => {
+        const saved = await saveSettings(s, patch);
+        return { lines: describeWifi(saved, st, list), json: saved };
+      };
+      switch (action) {
+        case undefined:
+          return { lines: describeWifi(cfg, st, list), json: { wifi: st.wifi ?? null, settings: cfg } };
+        case "trust": {
+          // without a name, the network in use
+          const ssid = target || st.wifi;
+          if (!ssid) throw new UsageError("Nessuna rete Wi-Fi in uso", "indica il nome: /wifi trust <rete>");
+          if (new TextEncoder().encode(ssid).length > 32) throw new UsageError("Il nome di una rete Wi-Fi è lungo al massimo 32 byte");
+          return save({ trusted_networks: trusted.includes(ssid) ? trusted : [...trusted, ssid] });
+        }
+        case "untrust": {
+          if (!trusted.includes(target)) throw new UsageError(`“${target}” non è tra le reti fidate`, "/wifi per vederle");
+          return save({ trusted_networks: trusted.filter((x) => x !== target) });
+        }
+        case "auto":
+          if (!target) throw new UsageError("Indica il tunnel, oppure off", "/wifi auto <tunnel|off>");
+          return save({ untrusted_tunnel: target.toLowerCase() === "off" ? null : findTunnel(list, target).id });
+        case "disconnect": {
+          const value = target.toLowerCase();
+          if (value !== "on" && value !== "off") throw new UsageError("Valori possibili: on, off");
+          return save({ disconnect_on_trusted: value === "on" });
+        }
+        default:
+          throw new UsageError("Uso: /wifi, /wifi trust [rete], /wifi untrust <rete>, /wifi auto <tunnel|off>, /wifi disconnect <on|off>");
+      }
     },
   },
   {

@@ -172,6 +172,9 @@ pub struct Status {
     pub blocked: bool,
     /// Set when the kill switch or split tunneling could not be applied.
     pub protection_error: Option<String>,
+    /// Name (SSID) of the Wi-Fi network the computer is on, if any and if the
+    /// OS lets the service read it.
+    pub wifi: Option<String>,
 }
 
 /// Kill switch mode: when traffic outside the tunnel is blocked.
@@ -226,6 +229,13 @@ pub struct Settings {
     /// Tunnel to connect when the service starts (i.e. at boot), unless a
     /// connection left up before is being restored.
     pub auto_connect: Option<String>,
+    /// Tunnel connected automatically on joining a Wi-Fi network that is not
+    /// in `trusted_networks`, if nothing is connected yet.
+    pub untrusted_tunnel: Option<String>,
+    /// Names (SSIDs) of the trusted Wi-Fi networks.
+    pub trusted_networks: Vec<String>,
+    /// Joining a trusted Wi-Fi network disconnects the VPN.
+    pub disconnect_on_trusted: bool,
 }
 
 /// A line of the service log.

@@ -61,6 +61,9 @@ submarine killswitch on
   resolving the server name again. With the kill switch, traffic stays blocked meanwhile.
 - **Desktop app and CLI.** A Tauri app with tray icon and an Ink prompt with completion,
   history and scriptable commands.
+- **Trusted Wi-Fi networks.** Joining a Wi-Fi network that is not trusted connects the chosen
+  tunnel, joining a trusted one (home, office) can disconnect it. The rules act only when the
+  network changes, so a manual choice afterwards is respected.
 - **Pause.** Disconnects for 5 minutes, 15 minutes or an hour, kill switch included, then
   connects again by itself; from the window, the tray menu or `submarine pause 15`.
 - **Live traffic.** Download and upload rates, a chart of the last minute and the session
@@ -108,6 +111,7 @@ submarine connect office           # tunnel name, even partial
 submarine status --json
 submarine killswitch on            # changes only that field of the settings
 submarine pause 15                 # 15 minutes without VPN, then it reconnects (or `resume`)
+submarine wifi trust               # trusts the Wi-Fi network in use; `wifi auto office` for the others
 submarine apps add "C:\Program Files\Mozilla Firefox\firefox.exe"
 ```
 
@@ -201,8 +205,9 @@ sudo packaging/macos/uninstall.sh   # removal, kill switch rules included
 
 </details>
 
-**Current limits:** no per-app tunnel (it needs a Network Extension); app and service are
-neither signed nor notarized; the service is installed manually.
+**Current limits:** no per-app tunnel (it needs a Network Extension); recent macOS versions may
+hide the Wi-Fi network name from the service, and then the trusted networks rules do not act;
+app and service are neither signed nor notarized; the service is installed manually.
 
 ## Linux
 
@@ -210,7 +215,8 @@ Service requirements:
 
 - `nft` (package `nftables`) for kill switch and split tunnel;
 - a kernel with `CONFIG_CGROUP_NET_CLASSID` for the per-app split tunnel (cgroup `net_cls`);
-- `resolvectl` if the system uses systemd-resolved (otherwise `/etc/resolv.conf` is managed).
+- `resolvectl` if the system uses systemd-resolved (otherwise `/etc/resolv.conf` is managed);
+- `iw` or NetworkManager's `nmcli` for the trusted Wi-Fi networks.
 
 **Known limits of the split tunnel:** apps are recognized by the path of their executable with
 a scan of `/proc` every 500 ms, so the very first packets of a newly started app may take the

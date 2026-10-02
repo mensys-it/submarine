@@ -62,6 +62,9 @@ submarine killswitch on
   frattempo.
 - **App desktop e CLI.** Un'app Tauri con icona nella tray e un prompt Ink con completamento,
   cronologia e comandi da script.
+- **Reti Wi-Fi fidate.** Entrando in una rete Wi-Fi non fidata si collega il tunnel scelto,
+  entrando in una fidata (casa, ufficio) si può disconnettere. Le regole scattano solo quando la
+  rete cambia, quindi una scelta manuale fatta dopo viene rispettata.
 - **Pausa.** Disconnette per 5 minuti, 15 minuti o un'ora, kill switch compreso, poi si
   riconnette da sola; dalla finestra, dal menu della tray o con `submarine pause 15`.
 - **Traffico in tempo reale.** Velocità di ricezione e invio, un grafico dell'ultimo minuto e
@@ -109,6 +112,7 @@ submarine connect ufficio          # nome del tunnel, anche parziale
 submarine status --json
 submarine killswitch on            # modifica solo quel campo delle impostazioni
 submarine pause 15                 # 15 minuti senza VPN, poi si riconnette (o `resume`)
+submarine wifi trust               # rete Wi-Fi in uso tra le fidate; `wifi auto ufficio` per le altre
 submarine apps add "C:\Program Files\Mozilla Firefox\firefox.exe"
 ```
 
@@ -203,8 +207,10 @@ sudo packaging/macos/uninstall.sh   # rimozione, incluse le regole del kill swit
 
 </details>
 
-**Limiti attuali:** niente tunnel per app (serve una Network Extension); app e servizio non
-firmati né notarizzati; installazione manuale del servizio.
+**Limiti attuali:** niente tunnel per app (serve una Network Extension); le versioni recenti di
+macOS possono nascondere al servizio il nome della rete Wi-Fi, e allora le regole delle reti
+fidate non scattano; app e servizio non firmati né notarizzati; installazione manuale del
+servizio.
 
 ## Linux
 
@@ -212,7 +218,8 @@ Requisiti del servizio:
 
 - `nft` (pacchetto `nftables`) per kill switch e split tunnel;
 - kernel con `CONFIG_CGROUP_NET_CLASSID` per lo split tunnel per app (cgroup `net_cls`);
-- `resolvectl` se il sistema usa systemd-resolved (altrimenti viene gestito `/etc/resolv.conf`).
+- `resolvectl` se il sistema usa systemd-resolved (altrimenti viene gestito `/etc/resolv.conf`);
+- `iw` oppure `nmcli` di NetworkManager per le reti Wi-Fi fidate.
 
 **Limiti noti dello split tunnel:** le app sono riconosciute dal percorso dell'eseguibile con
 una scansione di `/proc` ogni 500 ms, quindi i primissimi pacchetti di un'app appena avviata

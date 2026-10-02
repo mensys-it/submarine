@@ -1,5 +1,5 @@
 //! OS integration for a running tunnel: routes, DNS, kill switch firewall and
-//! per-app split tunneling.
+//! per-app split tunneling, plus the name of the Wi-Fi network in use.
 //!
 //! Every platform module (Linux, Windows, macOS, plus a fallback for the others)
 //! exposes the same types (`RouteManager`, `DnsManager`, `Firewall`, `SplitTunnel`
@@ -39,6 +39,10 @@ mod pf;
 #[cfg(any(windows, test))]
 #[cfg_attr(not(windows), allow(dead_code))]
 mod split_driver;
+
+// Wi-Fi network detection, with its own per-platform backends inside
+mod wifi;
+pub use wifi::current_ssid;
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 mod unsupported;

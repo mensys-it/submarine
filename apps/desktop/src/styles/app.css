@@ -1737,6 +1737,38 @@ label:has(input:focus-visible) {
   white-space: nowrap;
 }
 
+/* Wi-Fi Networks */
+
+.wifi-current {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 14px var(--space-5);
+}
+
+.wifi-current > p {
+  flex: 1;
+  color: var(--text-soft);
+  font-size: 14px;
+}
+
+/* The tunnel picker sits under its switch, with the caption of a form field. */
+.wifi-tunnel {
+  padding: 0 22px 18px;
+}
+
+.wifi-tunnel > span {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.wifi-list-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
 /* Logs */
 
 .logs-toolbar {

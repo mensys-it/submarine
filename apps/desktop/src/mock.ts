@@ -49,10 +49,22 @@ const idle: Status = {
   paused_until: null,
   blocked: false,
   protection_error: null,
+  // a Wi-Fi network that is not trusted, to try the rules
+  wifi: "Bar Centrale",
 };
 // state of the fake daemon
 let status: Status = idle;
-let settings: Settings = { kill_switch: "off", allow_lan: false, split_mode: "off", split_apps: [], prefer_tunnel: false, auto_connect: null };
+let settings: Settings = {
+  kill_switch: "off",
+  allow_lan: false,
+  split_mode: "off",
+  split_apps: [],
+  prefer_tunnel: false,
+  auto_connect: null,
+  untrusted_tunnel: null,
+  trusted_networks: ["Casa"],
+  disconnect_on_trusted: false,
+};
 let prefs: Prefs = {
   notifications: true,
   language: "system",

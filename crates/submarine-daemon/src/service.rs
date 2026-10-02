@@ -15,6 +15,11 @@
 //! (resolving the endpoint hostnames again) with growing delays between the
 //! attempts. A pause disconnects it on purpose for a while, kill switch
 //! included, and then connects it again the same way.
+//!
+//! The Wi-Fi network in use is followed too: joining a network that is not
+//! trusted can connect a tunnel, joining a trusted one can disconnect it. The
+//! rules act only when the network changes, so what the user does afterwards
+//! on the same network is respected.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -58,6 +63,15 @@ const RETRY_DELAYS: [Duration; 6] = [
 ];
 /// Longest pause accepted.
 const MAX_PAUSE: Duration = Duration::from_secs(24 * 3600);
+/// Interval between checks of the Wi-Fi network in use.
+const WIFI_INTERVAL: Duration = Duration::from_secs(5);
+/// Delay of the first Wi-Fi check, so that a connection restored at startup
+/// begins first and the rules see it in progress.
+const WIFI_FIRST_CHECK: Duration = Duration::from_secs(2);
+/// Maximum number of trusted Wi-Fi networks.
+const MAX_TRUSTED_NETWORKS: usize = 100;
+/// Longest SSID, in bytes (IEEE 802.11).
+const MAX_SSID_LEN: usize = 32;
 
 /// Who started a connection attempt, which decides what a failure does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,7 +214,69 @@ impl Service {
                 service.sync_protection(&mut inner).await;
             }
         }
+        tokio::spawn(service.clone().watch_wifi());
         service
+    }
+
+    /// Follows the Wi-Fi network in use, publishes it in the status and applies
+    /// the trusted networks rules when it changes. The first network seen also
+    /// counts as a change, so the rules apply at startup too.
+    async fn watch_wifi(self: Arc<Self>) {
+        let start = tokio::time::Instant::now() + WIFI_FIRST_CHECK;
+        let mut tick = tokio::time::interval_at(start, WIFI_INTERVAL);
+        let mut last: Option<Option<String>> = None;
+        loop {
+            tick.tick().await;
+            let ssid = submarine_net::current_ssid().await;
+            if last.as_ref() == Some(&ssid) {
+                continue;
+            }
+            tracing::info!(ssid = ?ssid, "wi-fi network changed");
+            last = Some(ssid.clone());
+            {
+                let mut inner = self.inner.lock().await;
+                let mut status = inner.status.clone();
+                status.wifi = ssid.clone();
+                self.publish(&mut inner, status);
+            }
+            // leaving Wi-Fi (cable, no network) triggers nothing
+            if let Some(ssid) = ssid {
+                self.on_wifi(&ssid).await;
+            }
+        }
+    }
+
+    /// Applies the trusted networks rules on joining `ssid`: a trusted network
+    /// disconnects (if so configured), any other one connects the untrusted
+    /// tunnel when nothing is connected. A pause is left alone by the latter.
+    async fn on_wifi(self: &Arc<Self>, ssid: &str) {
+        let action = {
+            let inner = self.inner.lock().await;
+            wifi_action(&inner.settings, inner.status.state, ssid)
+        };
+        let id = match action {
+            None => return,
+            Some(WifiAction::Disconnect) => {
+                tracing::info!(ssid, "trusted wi-fi network: disconnecting");
+                if let Err(e) = self.store.save_connected_tunnel(None) {
+                    tracing::warn!("cannot save the disconnection: {e}");
+                }
+                self.disconnect().await;
+                return;
+            }
+            Some(WifiAction::Connect(id)) => id,
+        };
+        // the same as a connect asked by the user, so a restart restores it
+        tracing::info!(ssid, %id, "untrusted wi-fi network: connecting");
+        if let Err(e) = self.store.save_connected_tunnel(Some(&id)) {
+            tracing::warn!("cannot save the connection: {e}");
+        }
+        let service = self.clone();
+        tokio::spawn(async move {
+            if let Err(e) = service.connect(&id, Attempt::User, None).await {
+                tracing::error!("connect on untrusted wi-fi failed: {e}");
+            }
+        });
     }
 
     /// Subscribes to the events sent to the clients.
@@ -307,7 +383,7 @@ impl Service {
     }
 
     /// Deletes a tunnel, refused while it is in use. It is also removed from
-    /// the auto-connect setting.
+    /// the auto-connect and untrusted network settings.
     async fn delete(&self, id: &str) -> Result<Response> {
         // check and removal under a single lock, so the tunnel cannot be connected in
         // between; the settings to update are read in the same critical section
@@ -317,11 +393,18 @@ impl Service {
                 return Err("disconnect before deleting this tunnel".into());
             }
             self.store.delete(id).map_err(err)?;
-            (inner.settings.auto_connect.as_deref() == Some(id)).then(|| inner.settings.clone())
+            let referenced = inner.settings.auto_connect.as_deref() == Some(id)
+                || inner.settings.untrusted_tunnel.as_deref() == Some(id);
+            referenced.then(|| inner.settings.clone())
         };
-        // removal from the auto-connect setting
+        // removal from the settings that name it
         if let Some(mut settings) = settings {
-            settings.auto_connect = None;
+            if settings.auto_connect.as_deref() == Some(id) {
+                settings.auto_connect = None;
+            }
+            if settings.untrusted_tunnel.as_deref() == Some(id) {
+                settings.untrusted_tunnel = None;
+            }
             self.set_settings(settings).await?;
         }
         self.notify_tunnels();
@@ -827,10 +910,12 @@ impl Service {
     }
 
     /// Replaces the connection part of the status. `blocked` and
-    /// `protection_error` belong to `sync_protection`, which callers run next.
+    /// `protection_error` belong to `sync_protection`, which callers run next,
+    /// and `wifi` to `watch_wifi`.
     fn set_status(&self, inner: &mut Inner, mut status: Status) {
         status.blocked = inner.status.blocked;
         status.protection_error = inner.status.protection_error.clone();
+        status.wifi = inner.status.wifi.clone();
         self.publish(inner, status);
     }
 
@@ -841,6 +926,35 @@ impl Service {
             let _ = self.events.send(Event::StatusChanged(status));
         }
     }
+}
+
+/// What joining a Wi-Fi network leads to, by the trusted networks rules.
+#[derive(Debug, PartialEq, Eq)]
+enum WifiAction {
+    /// Connect the tunnel with this id.
+    Connect(String),
+    /// Disconnect whatever is connected.
+    Disconnect,
+}
+
+/// Decides what joining `ssid` does in `state`: a trusted network disconnects
+/// (when `disconnect_on_trusted` is set and something is up), any other one
+/// connects `untrusted_tunnel` when nothing is connected. A connection being
+/// made, a pause and an unset tunnel lead to nothing.
+fn wifi_action(settings: &Settings, state: ConnectionState, ssid: &str) -> Option<WifiAction> {
+    if settings.trusted_networks.iter().any(|t| t == ssid) {
+        return (settings.disconnect_on_trusted && state != ConnectionState::Disconnected)
+            .then_some(WifiAction::Disconnect);
+    }
+    let idle = matches!(
+        state,
+        ConnectionState::Disconnected | ConnectionState::Failed
+    );
+    settings
+        .untrusted_tunnel
+        .clone()
+        .filter(|_| idle)
+        .map(WifiAction::Connect)
 }
 
 /// Split tunneling mode in effect: `Off` when no app is listed.
@@ -872,13 +986,31 @@ fn imported(id: String, name: &str, parsed: submarine_config::Parsed) -> Respons
     Response::Imported { tunnel, warnings }
 }
 
-/// Checks the settings sent by a client: the auto-connect tunnel must exist and
-/// the split tunneling apps must be at most `MAX_SPLIT_APPS`, with absolute paths.
+/// Checks the settings sent by a client: the tunnels they name must exist, the
+/// split tunneling apps must be at most `MAX_SPLIT_APPS`, with absolute paths,
+/// and the trusted networks at most `MAX_TRUSTED_NETWORKS` valid SSIDs.
 fn validate(store: &TunnelStore, settings: &Settings) -> Result<()> {
     if let Some(id) = &settings.auto_connect
         && store.get(id).is_err()
     {
         return Err("the tunnel to connect at startup does not exist".into());
+    }
+    if let Some(id) = &settings.untrusted_tunnel
+        && store.get(id).is_err()
+    {
+        return Err("the tunnel for untrusted networks does not exist".into());
+    }
+    if settings.trusted_networks.len() > MAX_TRUSTED_NETWORKS {
+        return Err(format!(
+            "at most {MAX_TRUSTED_NETWORKS} trusted networks can be listed"
+        ));
+    }
+    for ssid in &settings.trusted_networks {
+        if ssid.is_empty() || ssid.len() > MAX_SSID_LEN {
+            return Err(format!(
+                "a network name has 1 to {MAX_SSID_LEN} bytes: {ssid}"
+            ));
+        }
     }
     if settings.split_apps.len() > MAX_SPLIT_APPS {
         return Err(format!("at most {MAX_SPLIT_APPS} apps can be listed"));
@@ -1070,6 +1202,65 @@ mod tests {
         roaming.endpoint = None;
         assert!(!is_stalled(&[roaming.clone()]));
         assert!(is_stalled(&[roaming, peer(Some(STALL_TIMEOUT))]));
+    }
+
+    /// Settings with `untrusted` as the tunnel for untrusted networks and "Home"
+    /// as the only trusted one.
+    fn wifi_settings(untrusted: Option<&str>, disconnect_on_trusted: bool) -> Settings {
+        Settings {
+            untrusted_tunnel: untrusted.map(str::to_owned),
+            trusted_networks: vec!["Home".into()],
+            disconnect_on_trusted,
+            ..Settings::default()
+        }
+    }
+
+    // an untrusted network connects the chosen tunnel, only when idle
+    #[test]
+    fn untrusted_network_connects_when_idle() {
+        let settings = wifi_settings(Some("t1"), false);
+        let connect = Some(WifiAction::Connect("t1".into()));
+        assert_eq!(
+            wifi_action(&settings, ConnectionState::Disconnected, "Cafe"),
+            connect
+        );
+        assert_eq!(
+            wifi_action(&settings, ConnectionState::Failed, "Cafe"),
+            connect
+        );
+        for busy in [
+            ConnectionState::Connected,
+            ConnectionState::Connecting,
+            ConnectionState::Reconnecting,
+            ConnectionState::Paused,
+        ] {
+            assert_eq!(wifi_action(&settings, busy, "Cafe"), None);
+        }
+        let without = wifi_settings(None, false);
+        assert_eq!(
+            wifi_action(&without, ConnectionState::Disconnected, "Cafe"),
+            None
+        );
+    }
+
+    // a trusted network disconnects only when asked to, and never connects
+    #[test]
+    fn trusted_network_disconnects_if_configured() {
+        let on = wifi_settings(Some("t1"), true);
+        assert_eq!(
+            wifi_action(&on, ConnectionState::Connected, "Home"),
+            Some(WifiAction::Disconnect)
+        );
+        assert_eq!(
+            wifi_action(&on, ConnectionState::Disconnected, "Home"),
+            None
+        );
+        let off = wifi_settings(Some("t1"), false);
+        assert_eq!(wifi_action(&off, ConnectionState::Connected, "Home"), None);
+        assert_eq!(
+            wifi_action(&off, ConnectionState::Disconnected, "Home"),
+            None
+        );
     }
 
     // the retry delays grow and then stay at the last one

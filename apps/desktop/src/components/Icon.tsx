@@ -40,6 +40,12 @@ const paths = {
   ),
   spinner: <path d="M21 12a9 9 0 1 1-9-9" />,
   pause: <path d="M9 5v14M15 5v14" />,
+  wifi: (
+    <>
+      <path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.5 16a5 5 0 0 1 7 0" />
+      <circle cx="12" cy="19.5" r="0.6" />
+    </>
+  ),
   down: <path d="M12 4v16M6 14l6 6 6-6" />,
   up: <path d="M12 20V4M6 10l6-6 6 6" />,
   clock: (

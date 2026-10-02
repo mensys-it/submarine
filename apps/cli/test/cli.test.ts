@@ -113,6 +113,27 @@ describe("commands", () => {
     ]);
   });
 
+  // the network in use can be trusted, and the rules are set one at a time
+  test("wifi trusted networks and rules", async () => {
+    daemon.status = { ...daemon.status, wifi: "Bar Centrale" };
+    const shown = await run("wifi");
+    expect(plain(shown.lines[0])).toBe("● Rete Wi-Fi “Bar Centrale”  non fidata");
+    await run("wifi", ["trust"]);
+    expect(daemon.settings.trusted_networks).toEqual(["Bar Centrale"]);
+    const auto = await run("wifi", ["auto", "lab"]);
+    expect(daemon.settings.untrusted_tunnel).toBe("d4e5f6");
+    expect(auto.lines.map(plain)).toContain("  ⎿ sulle reti non fidate si connette a Laboratorio");
+    await run("wifi", ["disconnect", "on"]);
+    expect(daemon.settings.disconnect_on_trusted).toBe(true);
+    await run("wifi", ["untrust", "Bar", "Centrale"]);
+    expect(daemon.settings.trusted_networks).toEqual([]);
+    await run("wifi", ["auto", "off"]);
+    expect(daemon.settings.untrusted_tunnel).toBeNull();
+    // the kill switch and the other settings are left as they were
+    expect(daemon.settings.kill_switch).toBe("off");
+    await expect(run("wifi", ["untrust", "Altro"])).rejects.toBeInstanceOf(UsageError);
+  });
+
   // a pause stops the tunnel with the kill switch suspended, a resume connects it again
   test("pause and resume", async () => {
     await run("connect", ["lab"]);

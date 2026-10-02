@@ -1,6 +1,9 @@
 // Settings view: preferences of the desktop app (language, notifications, start and quit
-// behavior), stored by src-tauri, plus the network settings of the service.
+// behavior), stored by src-tauri, plus the network and Wi-Fi settings of the service.
+import { type FormEvent, useState } from "react";
+
 import type { Prefs } from "../api";
+import { Icon } from "../components/Icon";
 import { Switch, SwitchText } from "../components/Switch";
 import { useApp, useT } from "../store";
 
@@ -8,6 +11,9 @@ import { useApp, useT } from "../store";
 const languages: Prefs["language"][] = ["system", "it", "en"];
 // the service cannot prefer the tunnel over the LAN on macOS yet
 const mac = navigator.userAgent.includes("Mac");
+
+/** Longest SSID, in bytes, as the service accepts it (IEEE 802.11). */
+const MAX_SSID_BYTES = 32;
 
 /** Preferences of the desktop app, plus the network settings of the service. */
 export function SettingsView() {
@@ -99,6 +105,144 @@ export function SettingsView() {
         </div>
         <p className="hint">{s.preferTunnelFullHelp}</p>
       </section>
+
+      <WifiSection />
     </div>
+  );
+}
+
+/**
+ * Trusted Wi-Fi networks: the tunnel to connect on any other network, whether a trusted
+ * one disconnects, and the list itself, with a shortcut for the network in use.
+ */
+function WifiSection() {
+  const { settings, saveSettings, daemonUp, tunnels, status } = useApp();
+  const t = useT();
+  const w = t.wifi;
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const trusted = settings.trusted_networks;
+  const current = status.wifi;
+  const currentTrusted = current != null && trusted.includes(current);
+  const setTrusted = (list: string[]) => void saveSettings({ ...settings, trusted_networks: list });
+
+  /** Adds the typed network, unless empty, too long or already listed. */
+  function onAdd(e: FormEvent) {
+    e.preventDefault();
+    const ssid = draft.trim();
+    if (!ssid) return;
+    if (new TextEncoder().encode(ssid).length > MAX_SSID_BYTES) {
+      setError(w.tooLong);
+      return;
+    }
+    if (!trusted.includes(ssid)) setTrusted([...trusted, ssid]);
+    setDraft("");
+    setError(null);
+  }
+
+  return (
+    <section className="page-section" aria-labelledby="wifi-title">
+      <h2 id="wifi-title">{w.title}</h2>
+
+      {/* the network in use, with the shortcut to trust it or not */}
+      <div className="wifi-current card">
+        <Icon name="wifi" strokeWidth={2} className={currentTrusted ? "tone-rx" : "tone-time"} />
+        <p>
+          {current == null ? w.none : `${w.current(current)} ${currentTrusted ? w.trusted : w.untrusted}`}
+        </p>
+        {current != null && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={!daemonUp}
+            onClick={() => setTrusted(currentTrusted ? trusted.filter((x) => x !== current) : [...trusted, current])}
+          >
+            {currentTrusted ? w.untrust : w.trust}
+          </button>
+        )}
+      </div>
+
+      <div className="group-card">
+        <Switch
+          disabled={!daemonUp || tunnels.length === 0}
+          pressed={settings.untrusted_tunnel != null}
+          onChange={(on) => void saveSettings({ ...settings, untrusted_tunnel: on ? (tunnels[0]?.id ?? null) : null })}
+        >
+          <SwitchText title={w.connect} help={w.connectHelp} />
+        </Switch>
+        {settings.untrusted_tunnel != null && (
+          <label className="field switch-nested wifi-tunnel view-in">
+            <span>{w.tunnel}</span>
+            <select
+              className="input"
+              value={settings.untrusted_tunnel}
+              disabled={!daemonUp}
+              onChange={(e) => void saveSettings({ ...settings, untrusted_tunnel: e.target.value })}
+            >
+              {tunnels.map((tunnel) => (
+                <option key={tunnel.id} value={tunnel.id}>
+                  {tunnel.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <hr />
+        <Switch
+          disabled={!daemonUp}
+          pressed={settings.disconnect_on_trusted}
+          onChange={(disconnect_on_trusted) => void saveSettings({ ...settings, disconnect_on_trusted })}
+        >
+          <SwitchText title={w.disconnect} help={w.disconnectHelp} />
+        </Switch>
+      </div>
+
+      <div className="apps-box">
+        <h3 className="wifi-list-title">{w.list}</h3>
+        {trusted.length === 0 ? (
+          <p className="apps-empty">{w.empty}</p>
+        ) : (
+          <ul className="app-list">
+            {trusted.map((ssid) => (
+              <li key={ssid} className="app-row">
+                <span className="app-text">
+                  <span className="app-name">{ssid}</span>
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={!daemonUp}
+                  onClick={() => setTrusted(trusted.filter((x) => x !== ssid))}
+                  aria-label={w.removeNetwork(ssid)}
+                >
+                  {w.remove}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <form className="inline-field" onSubmit={onAdd}>
+          <input
+            className="input"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={w.placeholder}
+            aria-label={w.placeholder}
+            disabled={!daemonUp}
+          />
+          <button type="submit" className="btn btn-secondary" disabled={!daemonUp || !draft.trim()}>
+            <Icon name="plus" size={16} strokeWidth={2} />
+            {w.add}
+          </button>
+        </form>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+      <p className="hint">{w.rulesHint}</p>
+      {mac && <p className="hint">{w.macHint}</p>}
+    </section>
   );
 }
