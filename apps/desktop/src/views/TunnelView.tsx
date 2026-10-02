@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import type { ConnectionState, Settings, TunnelInfo } from "../api";
+import { DeleteModal } from "../components/DeleteModal";
 import { Icon } from "../components/Icon";
 import { InfoCard } from "../components/InfoCard";
 import { type HeroState, OceanHero } from "../components/OceanHero";
@@ -72,6 +73,7 @@ export function TunnelView({ tunnel }: { tunnel: TunnelInfo }) {
   const isThis = status.tunnel_id === tunnel.id;
   const state: ConnectionState = isThis ? status.state : "disconnected";
   const hero = heroStates[state];
+  const deletable = state === "disconnected" || state === "failed";
   const otherActive = !isThis && status.state === "connected";
   const peer = isThis ? status.peers[0] : undefined;
   const endpoint = peer?.endpoint ?? tunnel.endpoints[0] ?? null;
@@ -174,32 +176,31 @@ export function TunnelView({ tunnel }: { tunnel: TunnelInfo }) {
       </div>
 
       <footer className="view-footer">
-        {confirmDelete ? (
-          <>
-            <span>{t.tunnel.deleteConfirm(tunnel.name)}</span>
-            <button type="button" className="link-button danger" onClick={() => deleteTunnel(tunnel.id)}>
-              {t.tunnel.deleteYes}
-            </button>
-            <button type="button" className="link-button" onClick={() => setConfirmDelete(false)}>
-              {t.common.cancel}
-            </button>
-          </>
-        ) : (
-          <>
-            <button type="button" className="link-button" onClick={() => openEdit(tunnel.id)}>
-              {t.tunnel.edit}
-            </button>
-            <button
-              type="button"
-              className="link-button"
-              onClick={() => setConfirmDelete(true)}
-              disabled={state !== "disconnected" && state !== "failed"}
-            >
-              {t.tunnel.delete}
-            </button>
-          </>
-        )}
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(tunnel.id)}>
+          <Icon name="edit" size={16} strokeWidth={2} />
+          {t.tunnel.edit}
+        </button>
+        {/* a tunnel in use cannot be deleted: the tooltip says why */}
+        <button
+          type="button"
+          className="btn btn-danger btn-sm footer-end"
+          onClick={() => setConfirmDelete(true)}
+          disabled={!deletable}
+          title={deletable ? undefined : t.tunnel.deleteInUse}
+        >
+          <Icon name="trash" size={16} strokeWidth={2} />
+          {t.tunnel.delete}
+        </button>
       </footer>
+
+      <DeleteModal
+        tunnel={confirmDelete ? tunnel : null}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => {
+          setConfirmDelete(false);
+          void deleteTunnel(tunnel.id);
+        }}
+      />
     </div>
   );
 }

@@ -106,8 +106,11 @@ const it = {
     edited: "Modifiche salvate. Alcune righe della configurazione sono state ignorate:",
     edit: "Modifica tunnel",
     delete: "Elimina tunnel",
-    deleteConfirm: (name: string) => `Eliminare “${name}”? Il file di configurazione verrà rimosso.`,
+    deleteTitle: "Eliminare il tunnel?",
+    deleteConfirm: (name: string) =>
+      `“${name}” e la sua configurazione WireGuard verranno rimossi da questo computer. L’operazione non si può annullare.`,
     deleteYes: "Elimina",
+    deleteInUse: "Disconnettiti per eliminare questo tunnel.",
   },
   summary: {
     killSwitch: {
@@ -368,8 +371,11 @@ const en: Texts = {
     edited: "Changes saved. Some lines of the configuration were ignored:",
     edit: "Edit tunnel",
     delete: "Delete tunnel",
-    deleteConfirm: (name) => `Delete “${name}”? Its configuration file will be removed.`,
+    deleteTitle: "Delete this tunnel?",
+    deleteConfirm: (name) =>
+      `“${name}” and its WireGuard configuration will be removed from this computer. This cannot be undone.`,
     deleteYes: "Delete",
+    deleteInUse: "Disconnect to delete this tunnel.",
   },
   summary: {
     killSwitch: { off: "Kill switch off", on_connect: "Kill switch on", always: "Kill switch always on" },

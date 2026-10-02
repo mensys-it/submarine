@@ -239,6 +239,33 @@ label:has(input:focus-visible) {
   padding: 0 16px;
 }
 
+/* Destructive actions: outlined red where they sit next to other actions, solid red
+   where they confirm. */
+.btn-danger {
+  border-color: rgba(255, 122, 107, 0.45);
+  background: rgba(40, 14, 18, 0.6);
+  color: var(--red-text);
+}
+
+.btn-danger:not(:disabled):hover {
+  border-color: var(--red);
+  background: rgba(60, 18, 22, 0.75);
+}
+
+.btn-danger-solid {
+  border: 0;
+  background: var(--red);
+  color: #2a0905;
+}
+
+.btn-danger:disabled {
+  border-color: var(--line-strong);
+  background: transparent;
+  color: var(--text-muted);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .icon-button {
   width: 44px;
   height: 44px;
@@ -268,9 +295,6 @@ label:has(input:focus-visible) {
   opacity: 0.6;
 }
 
-.link-button.danger {
-  color: var(--red-text);
-}
 
 /* Cards */
 
@@ -1607,6 +1631,11 @@ label:has(input:focus-visible) {
   color: var(--text-secondary);
 }
 
+/* The destructive action sits apart, at the far end of the footer. */
+.footer-end {
+  margin-left: auto;
+}
+
 /* Pages */
 
 .page {
@@ -1809,6 +1838,27 @@ label:has(input:focus-visible) {
   box-shadow: var(--shadow-pop);
   color: var(--text);
   overflow-y: auto;
+}
+
+.modal-sm {
+  width: min(500px, calc(100% - 64px));
+}
+
+/* Icon tile of a destructive dialog, in the red of the action it confirms.
+   NB: it comes before the title, so it undoes the column layout of the first child of
+   .modal-header and hands it to the text next to it. */
+.modal-header > .danger-badge:first-child {
+  flex: none;
+  flex-direction: row;
+  color: var(--red-text);
+  background: rgba(255, 122, 107, 0.12);
+}
+
+.modal-header > .danger-badge + div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .modal[open] {
