@@ -7,7 +7,7 @@
 # On the first installation it asks whether every user of this Mac may use
 # Submarine, or only the user who ran sudo (administrators always can); the
 # options answer without asking. Updates keep the previous choice.
-set -eu
+set -euo pipefail
 
 LABEL=it.mensys.submarine.daemon
 PLIST=/Library/LaunchDaemons/$LABEL.plist

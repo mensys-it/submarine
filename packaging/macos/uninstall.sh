@@ -3,7 +3,7 @@
 # directory, with the stored tunnels, is left in place.
 #
 #   sudo packaging/macos/uninstall.sh
-set -eu
+set -euo pipefail
 
 LABEL=it.mensys.submarine.daemon
 PLIST=/Library/LaunchDaemons/$LABEL.plist
