@@ -93,6 +93,10 @@ sudo groupadd -f submarine && sudo usermod -aG submarine "$USER"   # poi rifai i
 sudo ./target/debug/submarine-daemon
 ```
 
+Può usare il servizio ogni utente che riesce ad aprirne il socket. Per consentirlo solo ad alcuni
+utenti (root e gli amministratori possono sempre), esegui da root `submarine-daemon access only
+<utente>...`; `access all` lo consente di nuovo a tutti, `access` mostra la scelta attuale.
+
 ### 3. Import di un tunnel e connessione
 
 ```sh
@@ -154,6 +158,7 @@ all'eseguibile:
 .\submarine-cli.exe import Ufficio .\ufficio.conf
 .\submarine-cli.exe connect <id>
 .\submarine-daemon.exe reset-firewall   # rimuove le regole del kill switch
+.\submarine-daemon.exe access only <utente>   # solo questo utente (e gli amministratori)
 ```
 
 <details>
@@ -208,7 +213,8 @@ sudo packaging/macos/uninstall.sh   # rimozione, incluse le regole del kill swit
   crash o un riavvio.
 - Kill switch con un anchor `pf` (`com.apple/submarine`) che consente il traffico cifrato per
   indirizzo e porta dell'endpoint.
-- Il socket del servizio è accessibile al gruppo `staff`, cioè agli utenti locali.
+- Il socket del servizio è accessibile al gruppo `staff`, cioè agli utenti locali;
+  `submarine-daemon access only <utente>` lo limita ad alcuni di loro.
 - Tunnel salvati cifrati con una chiave conservata nel System keychain.
 - Log in `/var/log/submarine-daemon.log`.
 

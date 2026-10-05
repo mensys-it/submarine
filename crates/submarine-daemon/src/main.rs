@@ -7,11 +7,13 @@
 //! Usage:
 //!   submarine-daemon [--socket <path>] [--data-dir <path>]   run in the foreground
 //!   submarine-daemon reset-firewall                          remove kill switch rules
+//!   submarine-daemon access [all | only <user>...]           who may use the service
 //!   submarine-daemon service install|uninstall|run           Windows service (Windows only)
 //!
 //! `--socket` and `--data-dir` can also be set with SUBMARINE_SOCKET and
 //! SUBMARINE_DATA_DIR.
 
+mod access;
 mod datadir;
 mod logbuf;
 mod server;
@@ -149,13 +151,18 @@ fn main() -> ExitCode {
             init_logging(None);
             runtime().block_on(reset_firewall())
         }
+        // who may use the service, written by the installer
+        Some("access") => {
+            init_logging(None);
+            access::command(&args[2..], &Config::from_args(&[]).data_dir)
+        }
         // Windows service management, handled entirely by `winsvc`
         #[cfg(windows)]
         Some("service") => return winsvc::command(args.get(2).map(String::as_str), &args),
         // usage
         Some("-h" | "--help") => {
             eprintln!(
-                "usage: {0} [--socket <path>] [--data-dir <path>]\n       {0} reset-firewall",
+                "usage: {0} [--socket <path>] [--data-dir <path>]\n       {0} reset-firewall\n       {0} access [all | only <user>...]",
                 args[0]
             );
             #[cfg(windows)]
@@ -198,7 +205,7 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()>) -> std::io:
 
     // clients are served until the shutdown request
     tokio::select! {
-        result = server::serve(listener, service.clone()) => result?,
+        result = server::serve(listener, service.clone(), config.data_dir.clone()) => result?,
         () = shutdown => tracing::info!("shutting down"),
     }
     service.shutdown().await;

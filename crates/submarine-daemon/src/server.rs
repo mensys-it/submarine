@@ -7,7 +7,9 @@
 //! are never interleaved on the socket.
 
 use std::io;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use interprocess::local_socket::tokio::prelude::*;
 use submarine_ipc::{
@@ -18,17 +20,56 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::service::Service;
 
-/// Accepts clients forever, each one served by its own task.
+/// Message for a user who may not use the service (see `access`).
+const REFUSED: &str =
+    "this user is not allowed to use Submarine on this computer: ask an administrator";
+/// How long a refused client may take to send its first request, which is answered
+/// with [`REFUSED`].
+const REFUSE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Accepts clients forever, each one served by its own task. `data_dir` holds the
+/// access file, read again for every client.
 ///
 /// A failed `accept` is logged and does not stop the server.
-pub async fn serve(listener: Listener, service: Arc<Service>) -> io::Result<()> {
+pub async fn serve(listener: Listener, service: Arc<Service>, data_dir: PathBuf) -> io::Result<()> {
+    let data_dir = Arc::new(data_dir);
     loop {
         match listener.accept().await {
             Ok(conn) => {
-                tokio::spawn(handle_client(conn, service.clone()));
+                let (service, data_dir) = (service.clone(), data_dir.clone());
+                tokio::spawn(async move {
+                    // users not allowed get neither events nor answers
+                    match crate::access::check(&conn, &data_dir) {
+                        Ok(()) => handle_client(conn, service).await,
+                        Err(reason) => {
+                            tracing::warn!("client refused: {reason}");
+                            refuse(conn).await;
+                        }
+                    }
+                });
             }
             Err(err) => tracing::warn!("accept failed: {err}"),
         }
+    }
+}
+
+/// Answers the first request of a refused client with [`REFUSED`], so that the user
+/// learns why, then closes the connection.
+async fn refuse(conn: Connection) {
+    let (reader, mut writer) = conn.split();
+    let mut reader = BufReader::new(reader);
+    let mut buf = String::new();
+    let first = tokio::time::timeout(
+        REFUSE_TIMEOUT,
+        read_message::<ClientMessage, _>(&mut reader, &mut buf),
+    )
+    .await;
+    if let Ok(Ok(Some(ClientMessage { id, .. }))) = first {
+        let message = ServerMessage::Response {
+            id,
+            result: Err(REFUSED.into()),
+        };
+        let _ = write_message(&mut writer, &message).await;
     }
 }
 

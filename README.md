@@ -92,6 +92,10 @@ sudo groupadd -f submarine && sudo usermod -aG submarine "$USER"   # then log in
 sudo ./target/debug/submarine-daemon
 ```
 
+Every user who can open the service socket may use it. To allow only some users (root and
+administrators always can), run as root `submarine-daemon access only <user>...`; `access all`
+allows everybody again, `access` shows the current choice.
+
 ### 3. Import a tunnel and connect
 
 ```sh
@@ -153,6 +157,7 @@ executable:
 .\submarine-cli.exe import Office .\office.conf
 .\submarine-cli.exe connect <id>
 .\submarine-daemon.exe reset-firewall   # removes the kill switch rules
+.\submarine-daemon.exe access only <user>   # only this user (and administrators) may use it
 ```
 
 <details>
@@ -207,7 +212,8 @@ sudo packaging/macos/uninstall.sh   # removal, kill switch rules included
   or a reboot.
 - Kill switch with a `pf` anchor (`com.apple/submarine`) that allows the encrypted traffic by
   endpoint address and port.
-- The service socket is accessible to the `staff` group, that is to local users.
+- The service socket is accessible to the `staff` group, that is to local users;
+  `submarine-daemon access only <user>` restricts it to some of them.
 - Stored tunnels encrypted with a key kept in the System keychain.
 - Log in `/var/log/submarine-daemon.log`.
 
