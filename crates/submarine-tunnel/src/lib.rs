@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use boringtun::noise::handshake::parse_handshake_anon;
+use boringtun::noise::rate_limiter::RateLimiter;
 use boringtun::noise::{Packet, Tunn, TunnResult};
 use boringtun::x25519;
 use ipnet::IpNet;
@@ -34,6 +35,11 @@ pub const DEFAULT_MTU: u16 = 1420;
 const TIMER_TICK: Duration = Duration::from_millis(250);
 /// Size of the packet buffers: the largest possible IP packet / UDP datagram.
 const BUF_SIZE: usize = 65536;
+/// Handshake messages per second, across all peers, above which a valid cookie
+/// (proof that the sender receives at its source address) is required.
+/// NB: every handshake message is counted twice, by [`udp_loop`] and again by boringtun
+/// inside `decapsulate`, so the limiter is created with twice this value.
+const HANDSHAKE_RATE_LIMIT: u64 = 100;
 
 /// Errors that prevent a tunnel from starting.
 #[derive(Debug, thiserror::Error)]
@@ -115,6 +121,9 @@ struct Shared {
     /// Local static key pair, needed to identify the sender of handshake initiations.
     private_key: x25519::StaticSecret,
     public_key: x25519::PublicKey,
+    /// MAC check and rate limit of handshake messages, shared with every peer's
+    /// boringtun session so that they all hand out the same cookies.
+    rate_limiter: Arc<RateLimiter>,
     /// Set to the failure reason when a packet loop stops with an I/O error.
     failure: watch::Sender<Option<String>>,
 }
@@ -165,12 +174,15 @@ impl Tunnel {
         // one boringtun state machine per peer, indexed by position
         let private_key = x25519::StaticSecret::from(*config.interface.private_key.as_bytes());
         let public_key = x25519::PublicKey::from(&private_key);
+        let rate_limiter = Arc::new(RateLimiter::new(&public_key, 2 * HANDSHAKE_RATE_LIMIT));
         let peers = config
             .peers
             .iter()
             .zip(&endpoints)
             .enumerate()
-            .map(|(idx, (peer, endpoint))| Peer::new(idx as u32, &private_key, peer, *endpoint))
+            .map(|(idx, (peer, endpoint))| {
+                Peer::new(idx as u32, &private_key, &rate_limiter, peer, *endpoint)
+            })
             .collect();
 
         let shared = Arc::new(Shared {
@@ -180,6 +192,7 @@ impl Tunnel {
             router: Router::new(&config.peers),
             private_key,
             public_key,
+            rate_limiter,
             failure: watch::Sender::new(None),
         });
 
@@ -388,6 +401,17 @@ async fn udp_loop(shared: Arc<Shared>) -> io::Result<()> {
         // datagrams not belonging to any known peer are dropped
         let (len, from) = shared.socket.recv_from(&mut src).await?;
         let datagram = &src[..len];
+        // MAC check and rate limit, before any public key operation or peer state
+        match gate(&shared.rate_limiter, from.ip(), datagram, &mut dst) {
+            Gate::Pass => {}
+            Gate::Cookie(range) => {
+                if let Err(err) = shared.socket.send_to(&dst[range], from).await {
+                    tracing::debug!(%from, "udp send failed: {err}");
+                }
+                continue;
+            }
+            Gate::Drop => continue,
+        }
         let Some(peer_idx) = find_peer(&shared, datagram) else {
             continue;
         };
@@ -426,6 +450,31 @@ async fn udp_loop(shared: Arc<Shared>) -> io::Result<()> {
     }
 }
 
+/// Outcome of [`gate`] for an incoming datagram.
+#[derive(Debug, PartialEq, Eq)]
+enum Gate {
+    /// Not a handshake message, or one with valid MACs: on to the peer.
+    Pass,
+    /// Handshake under load without a valid cookie: the cookie reply to send back,
+    /// as a range of the output buffer. No peer state is touched.
+    Cookie(Range<usize>),
+    /// Malformed datagram or handshake message with an invalid MAC.
+    Drop,
+}
+
+/// Checks the MACs of a handshake message before it reaches a peer. Without this a
+/// flood of forged initiations would cost a key exchange each (see [`find_peer`]); here
+/// it costs a hash, and under load the sender must prove with a cookie that it receives
+/// at its source address.
+fn gate(limiter: &RateLimiter, from: IpAddr, datagram: &[u8], dst: &mut [u8]) -> Gate {
+    let base = dst.as_ptr() as usize;
+    match limiter.verify_packet(Some(from), datagram, dst) {
+        Ok(_) => Gate::Pass,
+        Err(TunnResult::WriteToNetwork(cookie)) => Gate::Cookie(range_in(base, cookie)),
+        Err(_) => Gate::Drop,
+    }
+}
+
 /// Drives the WireGuard timers of every peer: handshake (re)initiation, keepalives and
 /// session expiry. Peers without a known endpoint are skipped.
 async fn timer_loop(shared: Arc<Shared>) {
@@ -433,6 +482,8 @@ async fn timer_loop(shared: Arc<Shared>) {
     let mut interval = tokio::time::interval(TIMER_TICK);
     loop {
         interval.tick().await;
+        // the shared limiter is not reset by boringtun; it resets at most once a second
+        shared.rate_limiter.reset_count();
         for peer in &shared.peers {
             let Some(endpoint) = peer.endpoint() else {
                 continue;
@@ -488,4 +539,66 @@ fn find_peer(shared: &Shared, datagram: &[u8]) -> Option<usize> {
     // `Tunn::new` shifts the peer index left by 8 bits to form session indices
     let idx = (receiver >> 8) as usize;
     (idx < shared.peers.len()).then_some(idx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Our static public key and a peer session that sends handshakes to it.
+    fn keys() -> (x25519::PublicKey, Tunn) {
+        let ours = x25519::StaticSecret::from([1u8; 32]);
+        let public = x25519::PublicKey::from(&ours);
+        let peer = Tunn::new(
+            x25519::StaticSecret::from([2u8; 32]),
+            public,
+            None,
+            None,
+            0,
+            None,
+        );
+        (public, peer)
+    }
+
+    /// A fresh handshake initiation from `peer`.
+    fn initiation(peer: &mut Tunn) -> Vec<u8> {
+        let mut buf = vec![0u8; BUF_SIZE];
+        match peer.format_handshake_initiation(&mut buf, true) {
+            TunnResult::WriteToNetwork(pkt) => pkt.to_vec(),
+            _ => panic!("no handshake initiation"),
+        }
+    }
+
+    // a genuine initiation passes, one with a forged MAC is dropped before the peer lookup
+    #[test]
+    fn gate_drops_forged_initiations() {
+        let (public, mut peer) = keys();
+        let limiter = RateLimiter::new(&public, 2 * HANDSHAKE_RATE_LIMIT);
+        let from: IpAddr = "203.0.113.7".parse().unwrap();
+        let mut dst = vec![0u8; BUF_SIZE];
+
+        let mut packet = initiation(&mut peer);
+        assert_eq!(gate(&limiter, from, &packet, &mut dst), Gate::Pass);
+        let last = packet.len() - 20;
+        packet[last] ^= 0xff;
+        assert_eq!(gate(&limiter, from, &packet, &mut dst), Gate::Drop);
+    }
+
+    // past the rate limit an initiation without a cookie gets a cookie reply
+    #[test]
+    fn gate_answers_with_a_cookie_under_load() {
+        let (public, mut peer) = keys();
+        let limiter = RateLimiter::new(&public, 2 * HANDSHAKE_RATE_LIMIT);
+        let from: IpAddr = "203.0.113.7".parse().unwrap();
+        let mut dst = vec![0u8; BUF_SIZE];
+        let packet = initiation(&mut peer);
+
+        for _ in 0..2 * HANDSHAKE_RATE_LIMIT {
+            assert_eq!(gate(&limiter, from, &packet, &mut dst), Gate::Pass);
+        }
+        let Gate::Cookie(range) = gate(&limiter, from, &packet, &mut dst) else {
+            panic!("no cookie under load");
+        };
+        assert_eq!(dst[range.start], 3);
+    }
 }

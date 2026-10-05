@@ -1,10 +1,11 @@
 //! Per-peer WireGuard state and cryptokey routing.
 
 use std::net::{IpAddr, SocketAddr};
-use std::sync::{Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Instant, SystemTime};
 
 use boringtun::noise::Tunn;
+use boringtun::noise::rate_limiter::RateLimiter;
 use boringtun::x25519;
 use ip_network::IpNetwork;
 use ip_network_table::IpNetworkTable;
@@ -32,9 +33,11 @@ pub(crate) struct Peer {
 impl Peer {
     /// Creates the boringtun session for `peer`. `index` is the peer position and is
     /// embedded in the session indices, so incoming datagrams can be mapped back to it.
+    /// `rate_limiter` is the tunnel-wide one, shared by all peers.
     pub fn new(
         index: u32,
         private_key: &x25519::StaticSecret,
+        rate_limiter: &Arc<RateLimiter>,
         peer: &submarine_config::Peer,
         endpoint: Option<SocketAddr>,
     ) -> Self {
@@ -44,7 +47,7 @@ impl Peer {
             peer.preshared_key.as_ref().map(|k| *k.as_bytes()),
             peer.persistent_keepalive,
             index,
-            None,
+            Some(rate_limiter.clone()),
         );
         Self {
             public_key: peer.public_key,
