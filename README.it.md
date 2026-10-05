@@ -173,6 +173,8 @@ all'eseguibile:
 - Kill switch con filtri WFP persistenti.
 - La named pipe è accessibile solo agli utenti connessi in modo interattivo, che non possono
   crearne istanze; i client rifiutano una pipe che non appartiene a SYSTEM o Administrators.
+  Il suo nome cambia a ogni avvio ed è pubblicato in `HKLM\SOFTWARE\Submarine`, così una pipe
+  creata in anticipo da un altro utente non può impedire l'avvio del servizio.
   La cartella `ProgramData\Submarine` è accessibile solo a SYSTEM e Administrators; se un
   altro utente la crea prima del servizio, viene spostata da parte e sostituita.
 - Tunnel salvati cifrati con una chiave protetta da DPAPI, legata al computer.

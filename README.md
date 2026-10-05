@@ -171,7 +171,9 @@ executable:
   queries outside the tunnel are blocked even without the kill switch.
 - Kill switch with persistent WFP filters.
 - The named pipe is accessible only to interactively logged-on users, who cannot create
-  instances of it; clients refuse a pipe not owned by SYSTEM or Administrators. The
+  instances of it; clients refuse a pipe not owned by SYSTEM or Administrators. Its name
+  changes at every start and is published in `HKLM\SOFTWARE\Submarine`, so a pipe created
+  in advance by another user cannot keep the service from starting. The
   `ProgramData\Submarine` folder is accessible only to SYSTEM and Administrators; one
   created by another user before the service is moved aside and replaced.
 - Stored tunnels encrypted with a key protected by DPAPI, bound to the computer.

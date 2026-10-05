@@ -21,18 +21,108 @@ pub type Listener = interprocess::local_socket::tokio::Listener;
 /// Upper bound for one message, so a misbehaving peer cannot exhaust memory.
 pub const MAX_MESSAGE_LEN: u64 = 1024 * 1024;
 
+/// Registry key, under `HKEY_LOCAL_MACHINE`, where the Windows service publishes the
+/// name of its pipe: every user can read it, ONLY administrators can write it.
+#[cfg(windows)]
+const PIPE_KEY: &str = r"SOFTWARE\Submarine";
+/// Registry value holding the pipe name.
+#[cfg(windows)]
+const PIPE_VALUE: &str = "Pipe";
+
 /// Socket path (Unix) or pipe name (Windows). `SUBMARINE_SOCKET` overrides it.
+/// On Windows it is the name published by the service (see [`publish_pipe_name`]),
+/// or `submarine` when none is.
 pub fn socket_path() -> String {
     if let Ok(path) = std::env::var("SUBMARINE_SOCKET") {
         return path;
     }
     if cfg!(windows) {
+        #[cfg(windows)]
+        if let Some(name) = published_pipe_name() {
+            return name;
+        }
         "submarine".into()
     } else if cfg!(target_os = "macos") {
         "/var/run/submarine/daemon.sock".into()
     } else {
         "/run/submarine/daemon.sock".into()
     }
+}
+
+/// Publishes `name` as the pipe of the service, for [`socket_path`].
+/// NB: the service picks a new random name at every start. A pipe created in advance
+/// under a fixed name by another user would otherwise keep the service from starting.
+///
+/// # Errors
+/// Fails if the registry cannot be written, e.g. when not running as administrator.
+#[cfg(windows)]
+pub fn publish_pipe_name(name: &str) -> io::Result<()> {
+    use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, REG_SZ, RegSetKeyValueW};
+
+    let (key, value) = (wide(PIPE_KEY), wide(PIPE_VALUE));
+    let data = wide(name);
+    // SAFETY: valid NUL-terminated strings; the size includes the terminator.
+    let code = unsafe {
+        RegSetKeyValueW(
+            HKEY_LOCAL_MACHINE,
+            key.as_ptr(),
+            value.as_ptr(),
+            REG_SZ,
+            data.as_ptr().cast(),
+            (data.len() * 2) as u32,
+        )
+    };
+    match code {
+        0 => Ok(()),
+        code => Err(io::Error::from_raw_os_error(code as i32)),
+    }
+}
+
+/// Removes the published pipe name, when the service is uninstalled.
+#[cfg(windows)]
+pub fn unpublish_pipe_name() {
+    use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RegDeleteKeyValueW};
+
+    let (key, value) = (wide(PIPE_KEY), wide(PIPE_VALUE));
+    // SAFETY: valid NUL-terminated strings.
+    unsafe { RegDeleteKeyValueW(HKEY_LOCAL_MACHINE, key.as_ptr(), value.as_ptr()) };
+}
+
+/// The pipe name published by the service, if any. Only letters, digits and `-` are
+/// accepted, so the value can never point to a remote pipe.
+#[cfg(windows)]
+fn published_pipe_name() -> Option<String> {
+    use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
+
+    let (key, value) = (wide(PIPE_KEY), wide(PIPE_VALUE));
+    let mut buf = [0u16; 128];
+    let mut size = (buf.len() * 2) as u32;
+    // SAFETY: valid NUL-terminated strings, and a buffer of `size` bytes.
+    let code = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_SZ,
+            std::ptr::null_mut(),
+            buf.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    if code != 0 {
+        return None;
+    }
+    // the size includes the terminator
+    let len = (size as usize / 2).saturating_sub(1);
+    let name = String::from_utf16(&buf[..len]).ok()?;
+    let valid = !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    valid.then_some(name)
+}
+
+/// NUL-terminated UTF-16 form of `text`.
+#[cfg(windows)]
+fn wide(text: &str) -> Vec<u16> {
+    text.encode_utf16().chain([0]).collect()
 }
 
 /// Converts the path into a socket name: a namespaced pipe name on Windows, a file

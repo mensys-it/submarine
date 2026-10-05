@@ -128,8 +128,9 @@ fn uninstall() -> windows_service::Result<()> {
              removed when it stops (or at the next reboot)"
         );
     }
-    // removal of the service and of the split tunnel driver
+    // removal of the service, of the name of its pipe and of the split tunnel driver
     service.delete()?;
+    submarine_ipc::unpublish_pipe_name();
     if let Err(err) = submarine_net::remove_split_driver() {
         eprintln!("warning: split tunnel driver not removed: {err}");
     }

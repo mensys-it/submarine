@@ -21,6 +21,8 @@ pub use client::{Client, ClientError};
 pub use transport::{
     Connection, Listener, MAX_MESSAGE_LEN, bind, connect, read_message, socket_path, write_message,
 };
+#[cfg(windows)]
+pub use transport::{publish_pipe_name, unpublish_pipe_name};
 
 /// A command sent by a client; serialized as `{"method": ..., "params": ...}`.
 /// Its `Debug` output leaves out the configuration text, see the impl below.

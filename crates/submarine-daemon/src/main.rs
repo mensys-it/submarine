@@ -46,8 +46,12 @@ const MAX_LOG_SIZE: u64 = 10 * 1024 * 1024;
 
 /// Runtime configuration of the daemon.
 pub struct Config {
-    /// Name or path of the IPC socket the daemon listens on.
+    /// Name or path of the IPC socket the daemon listens on. On Windows, unless set
+    /// explicitly, a new random pipe name at every start (see `publish_socket`).
     pub socket: String,
+    /// Whether `socket` is a random pipe name to publish for the clients, see
+    /// `submarine_ipc::publish_pipe_name`.
+    pub publish_socket: bool,
     /// Directory holding tunnels, settings and state.
     pub data_dir: PathBuf,
     /// File the foreground daemon logs to, rotated like the one of the Windows
@@ -67,14 +71,25 @@ impl Config {
                 .and_then(|i| args.get(i + 1).cloned())
                 .or_else(|| std::env::var(env).ok())
         };
+        let socket = option("--socket", "SUBMARINE_SOCKET");
         Self {
-            socket: option("--socket", "SUBMARINE_SOCKET")
-                .unwrap_or_else(submarine_ipc::socket_path),
+            publish_socket: cfg!(windows) && socket.is_none(),
+            socket: socket.unwrap_or_else(default_socket),
             data_dir: option("--data-dir", "SUBMARINE_DATA_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(default_data_dir),
             log_file: option("--log-file", "SUBMARINE_LOG_FILE").map(PathBuf::from),
         }
+    }
+}
+
+/// Default socket of the platform: a random pipe name on Windows, the fixed path of
+/// `submarine_ipc::socket_path` elsewhere.
+fn default_socket() -> String {
+    if cfg!(windows) {
+        format!("submarine-{}", uuid::Uuid::new_v4().simple())
+    } else {
+        submarine_ipc::socket_path()
     }
 }
 
@@ -269,6 +284,12 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()>) -> std::io:
     let listener = submarine_ipc::bind(&config.socket)?;
     #[cfg(unix)]
     secure_socket(&config.socket)?;
+    // the random pipe name is published only once the pipe exists, so nobody can
+    // create it first
+    #[cfg(windows)]
+    if config.publish_socket {
+        submarine_ipc::publish_pipe_name(&config.socket)?;
+    }
     tracing::info!(socket = %config.socket, data_dir = %config.data_dir.display(), "submarine daemon ready");
 
     // clients are served until the shutdown request
