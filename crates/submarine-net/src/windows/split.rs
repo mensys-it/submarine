@@ -24,7 +24,7 @@ use windows_sys::Win32::Foundation::{
     CloseHandle, FILETIME, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
-    FreeMibTable, GetUnicastIpAddressTable, MIB_UNICASTIPADDRESS_TABLE,
+    FreeMibTable, GetUnicastIpAddressTable, MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE,
 };
 use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC};
 use windows_sys::Win32::Storage::FileSystem::{
@@ -240,26 +240,30 @@ fn interface_addresses(
             code,
         });
     }
-    // SAFETY: the API returned `NumEntries` rows.
-    let rows = unsafe {
-        std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize)
-    };
     // first match per family, among the interface's source addresses
     let (mut v4, mut v6) = (None, None);
-    for row in rows
-        .iter()
-        .filter(|r| r.InterfaceIndex == if_index && !r.SkipAsSource)
-    {
-        // SAFETY: the family tag selects the valid union member.
-        unsafe {
-            match row.Address.si_family {
+    // SAFETY: the API returned a table with `NumEntries` rows, freed below. They are
+    // read through raw pointers: the array is declared with a single element, and
+    // `SkipAsSource` is a BOOLEAN that Windows may set to values other than 0 and 1,
+    // which are not valid for a Rust `bool`, so no reference to either is created.
+    unsafe {
+        let first = (&raw const (*table).Table).cast::<MIB_UNICASTIPADDRESS_ROW>();
+        for i in 0..(*table).NumEntries as usize {
+            let row = first.add(i);
+            let skip_as_source = (&raw const (*row).SkipAsSource).cast::<u8>().read() != 0;
+            if (*row).InterfaceIndex != if_index || skip_as_source {
+                continue;
+            }
+            // the family tag selects the valid union member
+            let address = (*row).Address;
+            match address.si_family {
                 AF_INET if v4.is_none() => {
                     v4 = Some(std::net::Ipv4Addr::from(
-                        row.Address.Ipv4.sin_addr.S_un.S_addr.to_ne_bytes(),
+                        address.Ipv4.sin_addr.S_un.S_addr.to_ne_bytes(),
                     ));
                 }
                 AF_INET6 if v6.is_none() => {
-                    let addr = std::net::Ipv6Addr::from(row.Address.Ipv6.sin6_addr.u.Byte);
+                    let addr = std::net::Ipv6Addr::from(address.Ipv6.sin6_addr.u.Byte);
                     if !addr.is_unicast_link_local() {
                         v6 = Some(addr);
                     }
@@ -535,5 +539,17 @@ impl Drop for Device {
     fn drop(&mut self) {
         // SAFETY: handle from CreateFileW.
         unsafe { CloseHandle(self.0) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // the addresses of the loopback interface (index 1) are read from the table
+    #[test]
+    fn loopback_addresses() {
+        let (v4, _) = interface_addresses(1).unwrap();
+        assert_eq!(v4, Some(std::net::Ipv4Addr::LOCALHOST));
     }
 }
