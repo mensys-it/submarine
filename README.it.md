@@ -69,6 +69,9 @@ submarine killswitch on
   riconnette da sola; dalla finestra, dal menu della tray o con `submarine pause 15`.
 - **Traffico in tempo reale.** Velocità di ricezione e invio, un grafico dell'ultimo minuto e
   la durata della sessione nell'app; velocità, sparkline e durata nella riga di stato della CLI.
+- **Chiavi cifrate a riposo.** I tunnel salvati sono cifrati con una chiave protetta dal
+  keystore del sistema: DPAPI su Windows, il System keychain su macOS, `systemd-creds` (con il
+  TPM2 se presente) su Linux. Senza keystore la chiave è protetta solo dai permessi del file.
 - **Configurazione standard.** File `.conf` wg-quick, importati così come sono.
 
 ## Avvio rapido
@@ -164,6 +167,7 @@ all'eseguibile:
 - Kill switch con filtri WFP persistenti.
 - La named pipe è accessibile solo agli utenti connessi in modo interattivo; la cartella
   `ProgramData\Submarine` solo a SYSTEM e Administrators.
+- Tunnel salvati cifrati con una chiave protetta da DPAPI, legata al computer.
 - Log del servizio in `ProgramData\Submarine\daemon.log`.
 - Tunnel per app: driver kernel in `third_party/win-split-tunnel` (fork del driver di Mullvad),
   compilato e firmato in modalità test da GitHub Actions su un runner Windows ospitato. Se
@@ -203,6 +207,7 @@ sudo packaging/macos/uninstall.sh   # rimozione, incluse le regole del kill swit
 - Kill switch con un anchor `pf` (`com.apple/submarine`) che consente il traffico cifrato per
   indirizzo e porta dell'endpoint.
 - Il socket del servizio è accessibile al gruppo `staff`, cioè agli utenti locali.
+- Tunnel salvati cifrati con una chiave conservata nel System keychain.
 - Log in `/var/log/submarine-daemon.log`.
 
 </details>
@@ -219,7 +224,9 @@ Requisiti del servizio:
 - `nft` (pacchetto `nftables`) per kill switch e split tunnel;
 - kernel con `CONFIG_CGROUP_NET_CLASSID` per lo split tunnel per app (cgroup `net_cls`);
 - `resolvectl` se il sistema usa systemd-resolved (altrimenti viene gestito `/etc/resolv.conf`);
-- `iw` oppure `nmcli` di NetworkManager per le reti Wi-Fi fidate.
+- `iw` oppure `nmcli` di NetworkManager per le reti Wi-Fi fidate;
+- `systemd-creds` (systemd 250 o successivo) per proteggere la chiave dei tunnel salvati, con il
+  TPM2 se presente; senza, la chiave è protetta solo dai permessi del file.
 
 **Limiti noti dello split tunnel:** le app sono riconosciute dal percorso dell'eseguibile con
 una scansione di `/proc` ogni 500 ms, quindi i primissimi pacchetti di un'app appena avviata

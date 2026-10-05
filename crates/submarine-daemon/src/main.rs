@@ -16,6 +16,7 @@ mod logbuf;
 mod server;
 mod service;
 mod store;
+mod vault;
 #[cfg(windows)]
 mod winsvc;
 

@@ -68,6 +68,9 @@ submarine killswitch on
   connects again by itself; from the window, the tray menu or `submarine pause 15`.
 - **Live traffic.** Download and upload rates, a chart of the last minute and the session
   time in the app; rates, a sparkline and the session time in the CLI status line.
+- **Keys encrypted at rest.** Stored tunnels are encrypted with a key protected by the OS
+  keystore: DPAPI on Windows, the System keychain on macOS, `systemd-creds` (TPM2 when present)
+  on Linux. Without a keystore the key is protected by the file permissions only.
 - **Standard configuration.** Plain wg-quick `.conf` files, imported as they are.
 
 ## Quick Start
@@ -163,6 +166,7 @@ executable:
 - Kill switch with persistent WFP filters.
 - The named pipe is accessible only to interactively logged-on users; the
   `ProgramData\Submarine` folder only to SYSTEM and Administrators.
+- Stored tunnels encrypted with a key protected by DPAPI, bound to the computer.
 - Service log in `ProgramData\Submarine\daemon.log`.
 - Per-app tunnel: kernel driver in `third_party/win-split-tunnel` (fork of the Mullvad
   driver), built and test-signed by GitHub Actions on a hosted Windows runner. If
@@ -201,6 +205,7 @@ sudo packaging/macos/uninstall.sh   # removal, kill switch rules included
 - Kill switch with a `pf` anchor (`com.apple/submarine`) that allows the encrypted traffic by
   endpoint address and port.
 - The service socket is accessible to the `staff` group, that is to local users.
+- Stored tunnels encrypted with a key kept in the System keychain.
 - Log in `/var/log/submarine-daemon.log`.
 
 </details>
@@ -216,7 +221,9 @@ Service requirements:
 - `nft` (package `nftables`) for kill switch and split tunnel;
 - a kernel with `CONFIG_CGROUP_NET_CLASSID` for the per-app split tunnel (cgroup `net_cls`);
 - `resolvectl` if the system uses systemd-resolved (otherwise `/etc/resolv.conf` is managed);
-- `iw` or NetworkManager's `nmcli` for the trusted Wi-Fi networks.
+- `iw` or NetworkManager's `nmcli` for the trusted Wi-Fi networks;
+- `systemd-creds` (systemd 250 or later) to protect the key of the stored tunnels, with the
+  TPM2 when present; without it the key is protected by the file permissions only.
 
 **Known limits of the split tunnel:** apps are recognized by the path of their executable with
 a scan of `/proc` every 500 ms, so the very first packets of a newly started app may take the
