@@ -173,7 +173,8 @@ executable:
 - Per-app tunnel: kernel driver in `third_party/win-split-tunnel` (fork of the Mullvad
   driver), built and test-signed by GitHub Actions on a hosted Windows runner. If
   `dist/driver/submarine-split-tunnel.sys` exists, `build-windows.sh` includes it in the
-  installer. In "only the chosen apps" mode the chosen apps do not reach the local network.
+  installer. In "only the chosen apps" mode the chosen apps do not reach the local network,
+  and with the kill switch they are blocked outside the tunnel even if the driver fails.
 
 </details>
 

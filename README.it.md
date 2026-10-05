@@ -175,7 +175,7 @@ all'eseguibile:
   compilato e firmato in modalità test da GitHub Actions su un runner Windows ospitato. Se
   `dist/driver/submarine-split-tunnel.sys` esiste, `build-windows.sh` lo include
   nell'installer. In modalità "solo le app scelte" le app scelte non raggiungono la rete
-  locale.
+  locale e, con il kill switch, sono bloccate fuori dal tunnel anche se il driver non funziona.
 
 </details>
 

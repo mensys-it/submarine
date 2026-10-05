@@ -179,11 +179,12 @@ fn apply_blocking(p: &FirewallPolicy) -> Result<()> {
             return Ok(());
         }
         if p.split == SplitMode::Include {
-            // only the chosen apps are protected: with the tunnel up the driver
-            // keeps them inside it, without it they are blocked here
-            if tunnel_luid.is_none() {
-                block_apps(engine, p)?;
-            }
+            // only the chosen apps are protected: with the tunnel up the driver binds
+            // them to it, and they are blocked everywhere else
+            // NB: the app filters stay with the tunnel up too. An app the driver does
+            // not bind (driver not running, image not matched) would otherwise use the
+            // physical network, unprotected, while the user expects it to be
+            block_apps(engine, p, tunnel_luid)?;
             tracing::info!(
                 apps = p.split_apps.len(),
                 "firewall applied (chosen apps only)"
@@ -256,10 +257,10 @@ fn apply_blocking(p: &FirewallPolicy) -> Result<()> {
     })
 }
 
-/// Include mode without a tunnel: the chosen apps may reach only loopback
-/// and, if allowed, the LAN. Apps whose id cannot be computed (e.g. a missing
-/// executable) are skipped with a warning.
-fn block_apps(engine: &Engine, p: &FirewallPolicy) -> Result<()> {
+/// Include mode: the chosen apps may reach only loopback, the tunnel interface
+/// `tunnel_luid` when there is one and, if allowed, the LAN. Apps whose id cannot
+/// be computed (a path not on a local drive) are skipped with a warning.
+fn block_apps(engine: &Engine, p: &FirewallPolicy, tunnel_luid: Option<u64>) -> Result<()> {
     // (layer, IPv6)
     let layers = [
         (FWPM_LAYER_ALE_AUTH_CONNECT_V4, false),
@@ -285,6 +286,16 @@ fn block_apps(engine: &Engine, p: &FirewallPolicy) -> Result<()> {
                 FWP_ACTION_PERMIT,
                 &[Cond::AppId(app.blob()), Cond::Loopback],
             )?;
+            // the tunnel for this app, above its block
+            if let Some(luid) = tunnel_luid {
+                engine.add_filter(
+                    &layer,
+                    "Submarine: app tunnel",
+                    WEIGHT_PERMIT_TUNNEL,
+                    FWP_ACTION_PERMIT,
+                    &[Cond::AppId(app.blob()), Cond::LocalInterface(luid)],
+                )?;
+            }
             // LAN for this app, above its block
             if p.allow_lan {
                 if v6 {
