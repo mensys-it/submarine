@@ -55,11 +55,14 @@ pub(crate) fn render(p: &FirewallPolicy) -> Option<String> {
         "pass quick inet6 proto icmp6 all icmp6-type {{ routersol, routeradv, neighbrsol, neighbradv }}"
     );
     // optional exceptions: local networks both ways, plain DNS
+    // NB: the LAN rules MUST have a direction. The host's own address is usually
+    // private too, so an undirected `from {LAN} to any` would also match its
+    // outgoing traffic towards the internet and defeat the kill switch.
     if p.allow_lan {
-        let _ = writeln!(w, "pass quick inet from any to {LAN_V4}");
-        let _ = writeln!(w, "pass quick inet from {LAN_V4} to any");
-        let _ = writeln!(w, "pass quick inet6 from any to {LAN_V6}");
-        let _ = writeln!(w, "pass quick inet6 from {LAN_V6} to any");
+        let _ = writeln!(w, "pass out quick inet from any to {LAN_V4}");
+        let _ = writeln!(w, "pass in quick inet from {LAN_V4} to any");
+        let _ = writeln!(w, "pass out quick inet6 from any to {LAN_V6}");
+        let _ = writeln!(w, "pass in quick inet6 from {LAN_V6} to any");
     }
     if p.allow_dns {
         let _ = writeln!(
@@ -140,9 +143,29 @@ mod tests {
             ..policy()
         })
         .unwrap();
-        assert!(r.contains("pass quick inet from any to { 10.0.0.0/8"));
-        assert!(r.contains("pass quick inet6 from { fe80::/10"));
+        assert!(r.contains("pass out quick inet from any to { 10.0.0.0/8"));
+        assert!(r.contains("pass in quick inet6 from { fe80::/10"));
         assert!(r.contains("pass out quick proto { udp, tcp } from any to any port 53"));
         assert!(!r.contains("utun"));
+    }
+
+    // the LAN exceptions are directional, so traffic from the host's own private
+    // address towards the internet is still blocked
+    #[test]
+    fn lan_rules_have_a_direction() {
+        let r = render(&FirewallPolicy {
+            allow_lan: true,
+            ..policy()
+        })
+        .unwrap();
+        let lan_rules: Vec<&str> = r
+            .lines()
+            .filter(|l| l.contains("10.0.0.0/8") || l.contains("fe80::/10"))
+            .collect();
+        assert_eq!(lan_rules.len(), 4);
+        assert!(lan_rules.iter().all(|l| {
+            (l.starts_with("pass out quick") && l.contains("from any to {"))
+                || (l.starts_with("pass in quick") && l.ends_with("to any"))
+        }));
     }
 }
