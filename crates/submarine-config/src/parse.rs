@@ -222,7 +222,7 @@ fn parse_interface_key(
             for item in list(value) {
                 match item.parse::<IpAddr>() {
                     Ok(ip) => iface.dns_servers.push(ip),
-                    Err(_) if item.len() > MAX_NAME_LEN => return Err(invalid(line, key, item)),
+                    Err(_) if !is_search_domain(item) => return Err(invalid(line, key, item)),
                     Err(_) => iface.dns_search.push(item.to_owned()),
                 }
             }
@@ -359,6 +359,19 @@ fn parse_ip_net(line: usize, key: &str, value: &str) -> Result<IpNet, ConfigErro
         .parse::<IpNet>()
         .or_else(|_| value.parse::<IpAddr>().map(IpNet::from))
         .map_err(|_| invalid(line, key, value))
+}
+
+/// Whether `name` is a plain DNS name usable as a search domain: ASCII letters, digits,
+/// `-` and `.`, not starting with `-` nor `.`, at most [`MAX_NAME_LEN`] bytes.
+/// NB: search domains end up as arguments of `resolvectl` and `networksetup`, which
+/// run as root: a leading `-` would be read as an option.
+fn is_search_domain(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= MAX_NAME_LEN
+        && !name.starts_with(['-', '.'])
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
 }
 
 /// Parses an `Endpoint`: a socket address (IPv6 in brackets) or `hostname:port`.

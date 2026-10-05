@@ -280,3 +280,32 @@ fn limits_refuse_long_names() {
     let text = sized_config("", 1) + &format!("Endpoint = {long}:51820\n");
     assert!(invalid(&text));
 }
+
+// search domains are plain DNS names: no option-like, empty-label or odd characters
+#[test]
+fn search_domains_are_dns_names() {
+    let config = |dns: &str| {
+        format!(
+            "[Interface]\nPrivateKey = {PRIVATE}\nDNS = {dns}\n[Peer]\nPublicKey = {PUBLIC}\nAllowedIPs = 0.0.0.0/0\n"
+        )
+    };
+    let parsed = parse(&config("corp.example, office-1.example.")).unwrap();
+    assert_eq!(
+        parsed.config.interface.dns_search,
+        ["corp.example", "office-1.example."]
+    );
+    for bad in [
+        "-x.example",
+        ".example",
+        "a b.example",
+        "~corp.example",
+        "ex*ample",
+        "caf\u{e9}.example",
+    ] {
+        let err = parse(&config(bad)).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::InvalidValue { .. }),
+            "{bad}: {err:?}"
+        );
+    }
+}
