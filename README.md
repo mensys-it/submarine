@@ -164,8 +164,9 @@ executable:
 - DNS on the tunnel interface with the lowest metric; with an "all traffic" tunnel, DNS
   queries outside the tunnel are blocked even without the kill switch.
 - Kill switch with persistent WFP filters.
-- The named pipe is accessible only to interactively logged-on users; the
-  `ProgramData\Submarine` folder only to SYSTEM and Administrators.
+- The named pipe is accessible only to interactively logged-on users, who cannot create
+  instances of it; clients refuse a pipe not owned by SYSTEM or Administrators. The
+  `ProgramData\Submarine` folder is accessible only to SYSTEM and Administrators.
 - Stored tunnels encrypted with a key protected by DPAPI, bound to the computer.
 - Service log in `ProgramData\Submarine\daemon.log`.
 - Per-app tunnel: kernel driver in `third_party/win-split-tunnel` (fork of the Mullvad

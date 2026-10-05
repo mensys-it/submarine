@@ -46,7 +46,7 @@ fn to_name(path: &str) -> io::Result<Name<'_>> {
 
 /// Creates the daemon's listening socket, replacing a stale one.
 /// On Unix the parent directory is created if needed; on Windows the pipe gets an ACL
-/// that lets interactive users connect.
+/// that lets interactive users connect, but not create instances of their own.
 pub fn bind(path: &str) -> io::Result<Listener> {
     // the runtime directory may not exist yet (e.g. after a reboot on a tmpfs)
     #[cfg(unix)]
@@ -60,16 +60,37 @@ pub fn bind(path: &str) -> io::Result<Listener> {
     let options = {
         use interprocess::os::windows::local_socket::ListenerOptionsExt;
         use interprocess::os::windows::security_descriptor::SecurityDescriptor;
-        // SYSTEM and Administrators: full access; interactive (logged-on) users:
-        // read/write, i.e. they can talk to the service; nobody else
-        let sddl = widestring::u16cstr!("D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)");
-        options.security_descriptor(SecurityDescriptor::deserialize(sddl)?)
+        // SYSTEM and Administrators: full access; interactive (logged-on) users: only
+        // the rights clients request, i.e. they can talk to the service; nobody else
+        // NB: interactive users MUST NOT get GENERIC_WRITE. On a pipe it includes
+        // FILE_CREATE_PIPE_INSTANCE, which would let any of them add rogue server
+        // instances and intercept the other users' clients.
+        let sddl = format!(
+            "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;{:#x};;;IU)",
+            crate::winpipe::CLIENT_ACCESS
+        );
+        let sddl = widestring::U16CString::from_str(sddl).map_err(io::Error::other)?;
+        options.security_descriptor(SecurityDescriptor::deserialize(&sddl)?)
     };
     options.create_tokio()
 }
 
 /// Connects to the daemon's socket.
+/// On Windows the pipe is opened by [`crate::winpipe`], which requests only the rights
+/// granted by the pipe ACL and refuses a pipe not created by the service.
 pub(crate) async fn connect(path: &str) -> io::Result<Connection> {
+    #[cfg(windows)]
+    {
+        use interprocess::os::windows::named_pipe::local_socket::tokio::Stream as PipeStream;
+
+        let name = path.to_owned();
+        let handle = tokio::task::spawn_blocking(move || crate::winpipe::open(&name))
+            .await
+            .map_err(io::Error::other)??;
+        let stream = PipeStream::try_from(handle)?;
+        Ok(Connection::from(stream))
+    }
+    #[cfg(not(windows))]
     Connection::connect(to_name(path)?).await
 }
 

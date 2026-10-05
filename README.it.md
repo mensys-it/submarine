@@ -165,8 +165,9 @@ all'eseguibile:
 - DNS sull'interfaccia del tunnel con metrica minima; con un tunnel "tutto il traffico" le
   query DNS fuori dal tunnel vengono bloccate anche senza kill switch.
 - Kill switch con filtri WFP persistenti.
-- La named pipe è accessibile solo agli utenti connessi in modo interattivo; la cartella
-  `ProgramData\Submarine` solo a SYSTEM e Administrators.
+- La named pipe è accessibile solo agli utenti connessi in modo interattivo, che non possono
+  crearne istanze; i client rifiutano una pipe che non appartiene a SYSTEM o Administrators.
+  La cartella `ProgramData\Submarine` è accessibile solo a SYSTEM e Administrators.
 - Tunnel salvati cifrati con una chiave protetta da DPAPI, legata al computer.
 - Log del servizio in `ProgramData\Submarine\daemon.log`.
 - Tunnel per app: driver kernel in `third_party/win-split-tunnel` (fork del driver di Mullvad),

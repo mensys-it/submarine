@@ -9,6 +9,8 @@
 
 mod client;
 mod transport;
+#[cfg(windows)]
+mod winpipe;
 
 use serde::{Deserialize, Serialize};
 use submarine_config::TunnelConfig;
