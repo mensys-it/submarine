@@ -181,6 +181,8 @@ executable:
   `dist/driver/submarine-split-tunnel.sys` exists, `build-windows.sh` includes it in the
   installer. In "only the chosen apps" mode the chosen apps do not reach the local network,
   and with the kill switch they are blocked outside the tunnel even if the driver fails.
+  Their DNS queries still go through the system resolver (the DNS Client service), outside
+  the tunnel, so the names they look up are visible to the local network's DNS server.
 
 </details>
 

@@ -183,6 +183,8 @@ all'eseguibile:
   `dist/driver/submarine-split-tunnel.sys` esiste, `build-windows.sh` lo include
   nell'installer. In modalità "solo le app scelte" le app scelte non raggiungono la rete
   locale e, con il kill switch, sono bloccate fuori dal tunnel anche se il driver non funziona.
+  Le loro query DNS passano comunque dal resolver di sistema (il servizio Client DNS), fuori
+  dal tunnel, quindi i nomi che cercano sono visibili al server DNS della rete locale.
 
 </details>
 
