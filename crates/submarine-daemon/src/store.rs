@@ -175,7 +175,7 @@ impl TunnelStore {
         let data = match std::fs::read(self.path(id)?) {
             Ok(data) => data,
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
-                return read_json(&self.plain_path(id));
+                return read_json(&self.plain_path(id)).map_err(unknown_if_missing);
             }
             Err(err) => return Err(err),
         };
@@ -218,7 +218,7 @@ impl TunnelStore {
         let encrypted = std::fs::remove_file(self.path(id)?);
         let plain = std::fs::remove_file(self.plain_path(id));
         // an error only if neither file could be removed
-        encrypted.or(plain)
+        encrypted.or(plain).map_err(unknown_if_missing)
     }
 
     /// Encrypts and writes tunnel `id`, then removes its plain file of an older
@@ -329,9 +329,29 @@ pub(crate) fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
+/// Turns the "no such file" of a missing tunnel file into the error shown for an
+/// unknown tunnel, which tells the user what is wrong.
+fn unknown_if_missing(err: io::Error) -> io::Error {
+    if err.kind() == io::ErrorKind::NotFound {
+        io::Error::new(io::ErrorKind::NotFound, "unknown tunnel")
+    } else {
+        err
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // a missing tunnel is reported as unknown, not as a missing file
+    #[test]
+    fn unknown_tunnel_message() {
+        let (store, dir) = temp_store();
+        let id = "f".repeat(32);
+        assert_eq!(store.get(&id).err().unwrap().to_string(), "unknown tunnel");
+        assert_eq!(store.delete(&id).unwrap_err().to_string(), "unknown tunnel");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     /// Minimal valid configuration with a full tunnel (`0.0.0.0/0`).
     const CONF: &str = "[Interface]\nPrivateKey = yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=\nAddress = 10.0.0.2/32\n[Peer]\nPublicKey = xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=\nAllowedIPs = 0.0.0.0/0\nEndpoint = 1.2.3.4:51820\n";
