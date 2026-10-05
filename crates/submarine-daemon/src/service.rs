@@ -120,6 +120,8 @@ struct Inner {
     firewall: Firewall,
     /// Split tunneling (per-app routing).
     split: SplitTunnel,
+    /// Split tunneling can work on this computer, as checked at startup.
+    split_available: bool,
 }
 
 /// The daemon service, shared by every client through an `Arc`.
@@ -161,11 +163,20 @@ impl Service {
         if let Err(err) = split.stop().await {
             tracing::warn!("split tunnel cleanup failed: {err}");
         }
+        // without split tunneling (e.g. no driver on Windows) its settings are
+        // ignored, so that every app follows the tunnel routes
+        let split_available = SplitTunnel::available();
+        if !split_available {
+            tracing::info!("per-app split tunneling is not available on this computer");
+        }
 
         // initial state: disconnected, settings from disk
         let service = Arc::new(Self {
             inner: Mutex::new(Inner {
-                status: Status::default(),
+                status: Status {
+                    split_unavailable: !split_available,
+                    ..Status::default()
+                },
                 active: None,
                 generation: 0,
                 settings: store.settings(),
@@ -174,6 +185,7 @@ impl Service {
                 retries: 0,
                 firewall: Firewall::new(),
                 split,
+                split_available,
             }),
             store,
             bringing_up: Mutex::new(()),
@@ -426,12 +438,14 @@ impl Service {
         validate(&self.store, &settings)?;
         self.store.save_settings(&settings).map_err(err)?;
         let mut inner = self.inner.lock().await;
-        let routing_changed = route_options(&inner.settings) != route_options(&settings);
+        let available = inner.split_available;
+        let routing_changed =
+            route_options(&inner.settings, available) != route_options(&settings, available);
         inner.settings = settings.clone();
 
         // switching between include and full routing changes routes and DNS
         if routing_changed {
-            let opts = route_options(&settings);
+            let opts = route_options(&settings, available);
             if let Some(active) = inner.active.as_mut() {
                 if let Err(e) = apply_routing(active, opts).await {
                     tracing::error!("reconfiguring routes failed: {e}");
@@ -517,7 +531,7 @@ impl Service {
                 inner.endpoints = resolved.iter().flatten().copied().collect();
                 self.sync_protection(&mut inner).await;
             }
-            route_options(&inner.settings)
+            route_options(&inner.settings, inner.split_available)
         };
 
         // creation of the interface, routes and DNS, still without the lock
@@ -569,7 +583,7 @@ impl Service {
                     _stop_monitor: stop_tx,
                 };
                 // the settings may have changed while the lock was released
-                let now = route_options(&inner.settings);
+                let now = route_options(&inner.settings, inner.split_available);
                 if now != opts
                     && let Err(e) = apply_routing(&mut active, now).await
                 {
@@ -858,7 +872,7 @@ impl Service {
         // firewall policy: DNS is allowed only while resolving the endpoints;
         // DNS leaks are blocked when every app uses a tunnel with a default route
         // and its own DNS servers
-        let split = split_mode(&inner.settings);
+        let split = split_mode(&inner.settings, inner.split_available);
         let split_apps: Vec<PathBuf> = inner
             .settings
             .split_apps
@@ -914,11 +928,12 @@ impl Service {
 
     /// Replaces the connection part of the status. `blocked` and
     /// `protection_error` belong to `sync_protection`, which callers run next,
-    /// and `wifi` to `watch_wifi`.
+    /// `wifi` to `watch_wifi`, and `split_unavailable` is fixed at startup.
     fn set_status(&self, inner: &mut Inner, mut status: Status) {
         status.blocked = inner.status.blocked;
         status.protection_error = inner.status.protection_error.clone();
         status.wifi = inner.status.wifi.clone();
+        status.split_unavailable = inner.status.split_unavailable;
         self.publish(inner, status);
     }
 
@@ -960,20 +975,26 @@ fn wifi_action(settings: &Settings, state: ConnectionState, ssid: &str) -> Optio
         .map(WifiAction::Connect)
 }
 
-/// Split tunneling mode in effect: `Off` when no app is listed.
-fn split_mode(settings: &Settings) -> SplitMode {
+/// Split tunneling mode in effect: `Off` when no app is listed, or when split
+/// tunneling is not `available` on this computer.
+///
+/// NB: ignoring the settings without the driver is what keeps the chosen apps
+/// safe in include mode: the tunnel routes would lose against the physical
+/// network for every app, the chosen ones included.
+fn split_mode(settings: &Settings, available: bool) -> SplitMode {
     match settings.split_mode {
-        _ if settings.split_apps.is_empty() => SplitMode::Off,
+        _ if !available || settings.split_apps.is_empty() => SplitMode::Off,
         SplitTunnelMode::Off => SplitMode::Off,
         SplitTunnelMode::Include => SplitMode::Include,
         SplitTunnelMode::Exclude => SplitMode::Exclude,
     }
 }
 
-/// Routing options derived from the settings.
-fn route_options(settings: &Settings) -> RouteOptions {
+/// Routing options derived from the settings, with split tunneling `available`
+/// or not on this computer.
+fn route_options(settings: &Settings, available: bool) -> RouteOptions {
     RouteOptions {
-        split: split_mode(settings),
+        split: split_mode(settings, available),
         prefer_tunnel: settings.prefer_tunnel,
     }
 }
@@ -1308,5 +1329,22 @@ mod tests {
     #[test]
     fn retry_delays_grow() {
         assert!(RETRY_DELAYS.windows(2).all(|w| w[0] < w[1]));
+    }
+
+    // without split tunneling on this computer every app follows the tunnel,
+    // whatever the settings say
+    #[test]
+    fn split_settings_ignored_when_unavailable() {
+        let settings = Settings {
+            split_mode: SplitTunnelMode::Include,
+            split_apps: vec![submarine_ipc::AppRule {
+                name: "Browser".into(),
+                path: r"C:\Apps\browser.exe".into(),
+            }],
+            ..Settings::default()
+        };
+        assert_eq!(split_mode(&settings, true), SplitMode::Include);
+        assert_eq!(split_mode(&settings, false), SplitMode::Off);
+        assert_eq!(route_options(&settings, false).split, SplitMode::Off);
     }
 }

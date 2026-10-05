@@ -30,11 +30,14 @@ const heroStates: Record<ConnectionState, HeroState> = {
 /** Bare host of an endpoint: "vpn.example.com:51820" or "[2001:db8::1]:51820" to the host. */
 const hostOf = (endpoint: string) => endpoint.replace(/:\d+$/, "").replace(/^\[(.*)\]$/, "$1");
 
-/** One-line summary of the protection settings, e.g. "Kill switch on, only 2 apps". */
-function protectionSummary(t: Texts, settings: Settings): string {
+/**
+ * One-line summary of the protection settings, e.g. "Kill switch on, only 2 apps". The apps are
+ * left out when split tunneling is `unavailable` on this computer, since the daemon ignores them.
+ */
+function protectionSummary(t: Texts, settings: Settings, unavailable: boolean): string {
   const killSwitch = t.summary.killSwitch[settings.kill_switch];
   const count = settings.split_apps.length;
-  if (settings.split_mode === "off" || count === 0) return killSwitch;
+  if (unavailable || settings.split_mode === "off" || count === 0) return killSwitch;
   return `${killSwitch}, ${settings.split_mode === "include" ? t.summary.only : t.summary.except} ${t.summary.apps(count)}`;
 }
 
@@ -162,7 +165,7 @@ export function TunnelView({ tunnel }: { tunnel: TunnelInfo }) {
           </span>
           <span className="info-body">
             <span className="info-label">{t.tunnel.protection}</span>
-            <span className="info-value">{protectionSummary(t, settings)}</span>
+            <span className="info-value">{protectionSummary(t, settings, status.split_unavailable)}</span>
           </span>
           <Icon name="chevron" size={18} strokeWidth={2} className="card-chevron" />
         </button>

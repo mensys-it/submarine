@@ -96,6 +96,11 @@ impl SplitTunnel {
         Self
     }
 
+    /// Whether split tunneling can work on this computer: never here.
+    pub fn available() -> bool {
+        false
+    }
+
     /// Always fails with [`NetError::Unsupported`].
     pub async fn start(
         &mut self,

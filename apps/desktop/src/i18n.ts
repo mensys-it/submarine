@@ -147,6 +147,8 @@ const it = {
     perApp: "Tunnel per app",
     platformLater: (platform: string) =>
       `Su ${platform} la scelta delle app arriverà in una versione successiva: per ora tutte le app usano il tunnel.`,
+    noDriver:
+      "Su questo computer manca il driver che serve per scegliere le app, quindi tutte le app usano il tunnel. Per installarlo segui la guida “Tunnel per app su Windows” indicata nel README di Submarine.",
     modes: {
       off: { label: "Tutte le app", help: "Ogni app segue le regole del tunnel." },
       include: {
@@ -430,6 +432,8 @@ const en: Texts = {
     lanHelp: "Printers, NAS and the other devices on your network stay reachable.",
     perApp: "Per-app tunnel",
     platformLater: (platform) => `Choosing apps on ${platform} comes in a later version: for now every app uses the tunnel.`,
+    noDriver:
+      "The driver needed to choose apps is not installed on this computer, so every app uses the tunnel. To install it, follow the “Per-app tunnel on Windows” guide linked from Submarine’s README.",
     modes: {
       off: { label: "All apps", help: "Every app follows the tunnel’s rules." },
       include: {

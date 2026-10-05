@@ -11,19 +11,20 @@ import { Switch, SwitchText } from "../components/Switch";
 import { useApp, useT } from "../store";
 
 // per-app split tunneling needs a Network Extension on macOS, not available yet; `platform`
-// names the platform where it is missing, null where it works
+// names the platform where it is missing, null where it is implemented
 const platform = navigator.userAgent.includes("Mac") ? "macOS" : null;
-const splitSupported = platform === null;
 // on Windows the included apps lose the local network, so that mode gets its own help text
 const windows = navigator.userAgent.includes("Windows");
 const splitModes: SplitTunnelMode[] = ["off", "include", "exclude"];
 
 /** Settings of the kill switch and of split tunneling. */
 export function ProtectionView() {
-  const { settings, saveSettings } = useApp();
+  const { settings, status, saveSettings } = useApp();
   const [picking, setPicking] = useState(false);
   const t = useT();
   const p = t.protection;
+  // where it is implemented, the daemon says whether it can work (on Windows it needs the driver)
+  const splitSupported = platform === null && !status.split_unavailable;
 
   // saving of a partial change on top of the current settings
   const save = (patch: Partial<Settings>) => void saveSettings({ ...settings, ...patch });
@@ -82,7 +83,8 @@ export function ProtectionView() {
 
       <section className="page-section" aria-labelledby="split-title">
         <h2 id="split-title">{p.perApp}</h2>
-        {!splitSupported && <p className="hint">{p.platformLater(platform ?? "")}</p>}
+        {platform !== null && <p className="hint">{p.platformLater(platform)}</p>}
+        {platform === null && status.split_unavailable && <p className="hint">{p.noDriver}</p>}
         <div className="radio-grid" role="radiogroup" aria-labelledby="split-title">
           {splitModes.map((mode) => {
             const option = p.modes[mode];

@@ -21,6 +21,7 @@ const idle: Status = {
   paused_until: null,
   blocked: false,
   protection_error: null,
+  split_unavailable: false,
   wifi: null,
 };
 

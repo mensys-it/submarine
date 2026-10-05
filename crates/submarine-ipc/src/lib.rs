@@ -209,6 +209,10 @@ pub struct Status {
     pub blocked: bool,
     /// Set when the kill switch or split tunneling could not be applied.
     pub protection_error: Option<String>,
+    /// Per-app split tunneling cannot work on this computer: on Windows the
+    /// driver is not installed, on macOS it is not implemented yet. The split
+    /// settings are kept, but every app follows the tunnel routes.
+    pub split_unavailable: bool,
     /// Name (SSID) of the Wi-Fi network the computer is on, if any and if the
     /// OS lets the service read it.
     pub wifi: Option<String>,

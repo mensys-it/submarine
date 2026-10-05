@@ -23,7 +23,7 @@ export function ProtectionBanner() {
   if (!status.blocked || status.state === "connecting") return null;
 
   // what is blocked, and whether the block follows a dropped connection or the settings
-  const onlyApps = settings.split_mode === "include" && settings.split_apps.length > 0;
+  const onlyApps = !status.split_unavailable && settings.split_mode === "include" && settings.split_apps.length > 0;
   const what = onlyApps ? t.banner.blockedApps : t.banner.blocked;
   // a tunnel that dropped: failed for good, or being reconnected
   const dropped = status.state === "failed" || status.state === "reconnecting";

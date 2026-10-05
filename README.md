@@ -182,8 +182,10 @@ executable:
   driver), built and test-signed by GitHub Actions on a hosted Windows runner. The service
   loads it from `submarine-split-tunnel.sys` next to `submarine-daemon.exe`. If
   `dist/driver/submarine-split-tunnel.sys` exists, `build-windows.sh` includes it in the
-  installer. In "only the chosen apps" mode the chosen apps do not reach the local network,
-  and with the kill switch they are blocked outside the tunnel even if the driver fails.
+  installer. Without the driver the per-app settings are ignored, every app uses the tunnel
+  and the app shows the choice as unavailable. In "only the chosen apps" mode the chosen
+  apps do not reach the local network, and with the kill switch they are blocked outside the
+  tunnel even if the driver fails.
   Their DNS queries still go through the system resolver (the DNS Client service), outside
   the tunnel, so the names they look up are visible to the local network's DNS server.
 

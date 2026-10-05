@@ -82,6 +82,15 @@ impl SplitTunnel {
         Self::default()
     }
 
+    /// Whether split tunneling can work on this computer: the driver image must
+    /// be next to this executable.
+    ///
+    /// NB: the release installer does NOT ship the driver until Microsoft signs
+    /// it; users who want the feature build it and install it by hand.
+    pub fn available() -> bool {
+        driver_image().is_ok_and(|sys| sys.exists())
+    }
+
     /// Applies the configuration. Without a tunnel there is nothing to
     /// split; the kill switch for included apps is handled by the firewall.
     /// With mode `Off` or no apps, splitting is stopped. Apps whose drive
@@ -393,7 +402,7 @@ fn ensure_driver_running() -> Result<()> {
     let service = match manager.open_service(DRIVER_SERVICE, access) {
         Ok(service) => service,
         Err(_) => {
-            let sys = std::env::current_exe()?.with_file_name(DRIVER_FILE);
+            let sys = driver_image()?;
             if !sys.exists() {
                 return Err(NetError::Driver(format!("{} not found", sys.display())));
             }
@@ -427,6 +436,11 @@ fn ensure_driver_running() -> Result<()> {
         ));
     }
     Ok(())
+}
+
+/// Path of the driver image, next to this executable.
+fn driver_image() -> std::io::Result<PathBuf> {
+    Ok(std::env::current_exe()?.with_file_name(DRIVER_FILE))
 }
 
 /// Stops and deletes the driver service, e.g. when uninstalling.

@@ -239,17 +239,26 @@ export function describeStatus(st: Status, list: TunnelInfo[], now = Date.now() 
   return out;
 }
 
-/** Lines describing the kill switch, the local network and split tunneling. */
-function describeSettings(st: Settings): Line[] {
+/**
+ * Lines describing the kill switch, the local network and split tunneling, noting when split
+ * tunneling is `unavailable` on this computer.
+ */
+function describeSettings(st: Settings, unavailable = false): Line[] {
   const out: Line[] = [
     head([marks.on, st.kill_switch === "off" ? "dim" : "acc"], `Kill switch ${killSwitchLabels[st.kill_switch]}`),
     sub(killSwitchHints[st.kill_switch]),
     sub(`rete locale ${st.allow_lan ? "consentita" : "bloccata"} quando il kill switch blocca`),
     head([marks.on, st.split_mode === "off" ? "dim" : "acc"], "Tunnel per app: ", [splitLabels[st.split_mode], "fg"]),
   ];
+  if (unavailable) out.push(sub(splitUnavailable, "yel"));
   for (const app of st.split_apps) out.push(sub(`${app.name}  ${app.path}`));
   return out;
 }
+
+/** Note shown when the daemon cannot do split tunneling here; on Windows the driver is missing. */
+const splitUnavailable = `non disponibile su questo computer${
+  process.platform === "win32" ? " (manca il driver, vedi il README)" : ""
+}: tutte le app usano il tunnel`;
 
 /** Lines after a successful connection. */
 export function describeConnected(t: TunnelInfo, st: Status): Line[] {
@@ -445,7 +454,7 @@ export const commands: Command[] = [
     description: "stato di connessione e protezione",
     async run(s) {
       const [st, list, cfg] = await Promise.all([status(s), tunnels(s), settings(s)]);
-      return { lines: [...describeStatus(st, list), ...describeSettings(cfg)], json: { status: st, settings: cfg } };
+      return { lines: [...describeStatus(st, list), ...describeSettings(cfg, st.split_unavailable)], json: { status: st, settings: cfg } };
     },
   },
   {
@@ -618,8 +627,10 @@ export const commands: Command[] = [
       const apply = async (mode: SplitTunnelMode): Promise<Outcome> => {
         const cfg = await saveSettings(s, { split_mode: mode });
         const out = done(`Tunnel per app: ${splitLabels[mode]}`);
-        // a mode with an empty app list does nothing useful: hint to add some apps
-        if (mode !== "off" && cfg.split_apps.length === 0) {
+        // a mode the daemon cannot apply, or with an empty app list, does nothing useful
+        if (mode !== "off" && (await status(s)).split_unavailable) {
+          out.push(sub(splitUnavailable, "yel"));
+        } else if (mode !== "off" && cfg.split_apps.length === 0) {
           out.push(sub("nessuna app scelta: aggiungine con /apps add <percorso>", "yel"));
         }
         return { lines: out, json: cfg };

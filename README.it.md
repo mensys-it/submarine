@@ -184,8 +184,10 @@ all'eseguibile:
   compilato e firmato in modalità test da GitHub Actions su un runner Windows ospitato. Il
   servizio lo carica da `submarine-split-tunnel.sys` accanto a `submarine-daemon.exe`. Se
   `dist/driver/submarine-split-tunnel.sys` esiste, `build-windows.sh` lo include
-  nell'installer. In modalità "solo le app scelte" le app scelte non raggiungono la rete
-  locale e, con il kill switch, sono bloccate fuori dal tunnel anche se il driver non funziona.
+  nell'installer. Senza driver le impostazioni per app vengono ignorate, tutte le app usano il
+  tunnel e l'app mostra la scelta come non disponibile. In modalità "solo le app scelte" le
+  app scelte non raggiungono la rete locale e, con il kill switch, sono bloccate fuori dal
+  tunnel anche se il driver non funziona.
   Le loro query DNS passano comunque dal resolver di sistema (il servizio Client DNS), fuori
   dal tunnel, quindi i nomi che cercano sono visibili al server DNS della rete locale.
 

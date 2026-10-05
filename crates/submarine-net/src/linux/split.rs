@@ -45,6 +45,11 @@ impl SplitTunnel {
         }
     }
 
+    /// Whether split tunneling can work on this computer: always on Linux.
+    pub fn available() -> bool {
+        true
+    }
+
     /// Starts (or updates) tracking of the given executables. The mode and
     /// tunnel are handled by routing and the firewall on Linux.
     pub async fn start(

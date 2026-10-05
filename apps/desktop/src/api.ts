@@ -50,6 +50,8 @@ export interface Status {
   blocked: boolean;
   /** Why the kill switch or split tunneling could not be applied, if they could not. */
   protection_error: string | null;
+  /** Per-app split tunneling cannot work here (no driver on Windows): its settings are ignored. */
+  split_unavailable: boolean;
   /** Wi-Fi network the computer is on, if any and if the service can read it. */
   wifi: string | null;
 }

@@ -49,6 +49,7 @@ const idle: Status = {
   paused_until: null,
   blocked: false,
   protection_error: null,
+  split_unavailable: false,
   // a Wi-Fi network that is not trusted, to try the rules
   wifi: "Bar Centrale",
 };
