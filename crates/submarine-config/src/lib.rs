@@ -130,4 +130,7 @@ pub enum ConfigError {
     /// The configuration has no `[Peer]` section.
     #[error("configuration has no [Peer] sections")]
     NoPeers,
+    /// The configuration exceeds one of the limits that keep a stored tunnel small.
+    #[error("configuration too large: at most {max} {what}")]
+    TooLarge { what: &'static str, max: usize },
 }

@@ -236,3 +236,47 @@ fn private_key_is_redacted_in_debug() {
     assert!(!debug.contains(PSK));
     assert!(debug.contains(PUBLIC));
 }
+
+/// Minimal configuration with `extra` appended to `[Interface]` and `peers` peers.
+fn sized_config(extra: &str, peers: usize) -> String {
+    let mut text = format!("[Interface]\nPrivateKey = {PRIVATE}\n{extra}\n");
+    for _ in 0..peers {
+        text.push_str(&format!(
+            "[Peer]\nPublicKey = {PUBLIC}\nAllowedIPs = 0.0.0.0/0\n"
+        ));
+    }
+    text
+}
+
+// configurations within the limits are accepted
+#[test]
+fn limits_allow_real_configurations() {
+    let dns = vec!["10.0.0.1"; 16].join(", ");
+    assert!(parse(&sized_config(&format!("DNS = {dns}"), 64)).is_ok());
+}
+
+// too many peers, addresses or DNS entries, or too much text, are refused
+#[test]
+fn limits_refuse_oversized_configurations() {
+    let too_large = |text: &str| matches!(parse(text), Err(ConfigError::TooLarge { .. }));
+    assert!(too_large(&sized_config("", 65)));
+    let addresses = vec!["10.0.0.2/32"; 17].join(", ");
+    assert!(too_large(&sized_config(
+        &format!("Address = {addresses}"),
+        1
+    )));
+    let dns = vec!["a.example"; 17].join(", ");
+    assert!(too_large(&sized_config(&format!("DNS = {dns}"), 1)));
+    let padding = "# padding\n".repeat(7000);
+    assert!(too_large(&sized_config(&padding, 1)));
+}
+
+// DNS names longer than 253 bytes are refused, as search domains and endpoint hosts
+#[test]
+fn limits_refuse_long_names() {
+    let long = format!("{}.example", "a".repeat(250));
+    let invalid = |text: &str| matches!(parse(text), Err(ConfigError::InvalidValue { .. }));
+    assert!(invalid(&sized_config(&format!("DNS = {long}"), 1)));
+    let text = sized_config("", 1) + &format!("Endpoint = {long}:51820\n");
+    assert!(invalid(&text));
+}

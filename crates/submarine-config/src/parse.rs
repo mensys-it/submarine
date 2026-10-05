@@ -13,6 +13,17 @@ use crate::{
     ConfigError, Endpoint, HIDDEN, Interface, Peer, PublicKey, SecretKey, TunnelConfig, Warning,
 };
 
+/// Longest configuration text, in bytes. Real configurations take a few KiB.
+const MAX_TEXT_LEN: usize = 64 * 1024;
+/// Most `[Peer]` sections.
+const MAX_PEERS: usize = 64;
+/// Most interface addresses.
+const MAX_ADDRESSES: usize = 16;
+/// Most DNS entries, servers and search domains together.
+const MAX_DNS: usize = 16;
+/// Longest DNS name, for endpoint hosts and search domains.
+const MAX_NAME_LEN: usize = 253;
+
 /// Result of a successful parse: the configuration plus any non-fatal issues.
 #[derive(Debug, Clone)]
 pub struct Parsed {
@@ -81,6 +92,11 @@ pub fn parse_edited(input: &str, previous: &TunnelConfig) -> Result<Parsed, Conf
 /// Shared implementation of [`parse`] and [`parse_edited`]; `previous` is used only to
 /// resolve [`HIDDEN`] keys.
 fn parse_with(input: &str, previous: Option<&TunnelConfig>) -> Result<Parsed, ConfigError> {
+    // limits on the size, so that the summary of a stored tunnel stays small: the daemon
+    // sends the summaries of every tunnel in a single IPC message
+    if input.len() > MAX_TEXT_LEN {
+        return Err(too_large("bytes", MAX_TEXT_LEN));
+    }
     let mut warnings = Vec::new();
     let mut interface: Option<InterfaceBuilder> = None;
     let mut peers: Vec<PeerBuilder> = Vec::new();
@@ -143,10 +159,19 @@ fn parse_with(input: &str, previous: Option<&TunnelConfig>) -> Result<Parsed, Co
         }
     }
 
-    // validation of the mandatory parts and build of the peers
+    // validation of the mandatory parts, of the limits and build of the peers
     let iface = interface.ok_or(ConfigError::MissingInterface)?;
     if peers.is_empty() {
         return Err(ConfigError::NoPeers);
+    }
+    if peers.len() > MAX_PEERS {
+        return Err(too_large("peers", MAX_PEERS));
+    }
+    if iface.addresses.len() > MAX_ADDRESSES {
+        return Err(too_large("addresses", MAX_ADDRESSES));
+    }
+    if iface.dns_servers.len() + iface.dns_search.len() > MAX_DNS {
+        return Err(too_large("DNS entries", MAX_DNS));
     }
     let peers = peers
         .into_iter()
@@ -197,6 +222,7 @@ fn parse_interface_key(
             for item in list(value) {
                 match item.parse::<IpAddr>() {
                     Ok(ip) => iface.dns_servers.push(ip),
+                    Err(_) if item.len() > MAX_NAME_LEN => return Err(invalid(line, key, item)),
                     Err(_) => iface.dns_search.push(item.to_owned()),
                 }
             }
@@ -348,6 +374,7 @@ fn parse_endpoint(line: usize, key: &str, value: &str) -> Result<Endpoint, Confi
         .ok_or_else(|| invalid(line, key, value))?;
     let port = port.parse().map_err(|_| invalid(line, key, value))?;
     let valid_host = !host.is_empty()
+        && host.len() <= MAX_NAME_LEN
         && host
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.');
@@ -358,6 +385,11 @@ fn parse_endpoint(line: usize, key: &str, value: &str) -> Result<Endpoint, Confi
         host: host.to_owned(),
         port,
     })
+}
+
+/// Builds a [`ConfigError::TooLarge`]: at most `max` of `what`.
+fn too_large(what: &'static str, max: usize) -> ConfigError {
+    ConfigError::TooLarge { what, max }
 }
 
 /// Builds a [`ConfigError::Syntax`] for `line`.
