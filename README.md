@@ -146,8 +146,8 @@ scripts/windows/cargo.sh clippy -p submarine-daemon -- -D warnings   # checks on
 It produces `Submarine_<version>_x64-setup.exe`, which installs the app,
 `submarine-daemon.exe` and `wintun.dll` in `Program Files\Submarine` and registers the
 **Submarine** service (automatic start, LocalSystem account, restart on crash). On the first
-installation it asks whether every user may use Submarine or only the current one; updates
-keep the choice. Uninstalling removes the service and the kill switch rules.
+installation a page of the installer asks whether every user may use Submarine or only the
+current one; updates keep the choice. Uninstalling removes the service and the kill switch rules.
 
 Without the installer, from an **administrator** terminal, with `wintun.dll` next to the
 executable:

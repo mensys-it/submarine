@@ -8,9 +8,101 @@
 ; NB: the Tauri template already includes StrFunc.nsh and declares ${StrLoc};
 ; ${UnStrRep} is declared here, since the uninstaller needs it.
 
+!include nsDialogs.nsh
+
 ; registry key of the machine environment variables
 !define ENV_KEY "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
 ${UnStrRep}
+
+; Access page: who may use the service, chosen with two radio buttons right before
+; the installation starts.
+;
+; Tauri has hooks for the install and uninstall sections, but NOT for the pages, so
+; MUI_PAGE_INSTFILES is redefined to declare the access page in front of the
+; installation page. The rest of the body is the same as in MUI2
+; (Pages/InstallFiles.nsh); the uninstaller pages are left alone.
+!macroundef MUI_PAGE_INSTFILES
+!macro MUI_PAGE_INSTFILES
+  !insertmacro SUBMARINE_ACCESS_PAGE
+
+  !verbose push
+  !verbose ${MUI_VERBOSE}
+  !insertmacro MUI_PAGE_INIT
+  !insertmacro MUI_PAGEDECLARATION_INSTFILES
+  !verbose pop
+!macroend
+
+; Declaration of the access page and of its functions.
+;
+; NB: expanded where the template inserts the installation page, after its `Var`
+; declarations: $PassiveMode is NOT declared yet when this file is included.
+!macro SUBMARINE_ACCESS_PAGE
+  ; "all" or "only", empty when the page was skipped
+  Var AccessChoice
+  ; user of this desktop session as DOMAIN\user, empty when unknown
+  Var AccessUser
+  ; whether $AccessUser was already looked up
+  Var AccessUserProbed
+  Var AccessRadioAll
+  Var AccessRadioOnly
+
+  Page custom AccessPageShow AccessPageLeave
+
+  Function AccessPageShow
+    ; skipped in passive mode and on an upgrade, which keeps the choice in access.json
+    ${IfThen} $PassiveMode = 1 ${|} Abort ${|}
+    ExpandEnvStrings $0 "%ProgramData%\Submarine\access.json"
+    ${IfThen} ${FileExists} "$0" ${|} Abort ${|}
+
+    ; the user of this desktop session, looked up once even if the page is shown again
+    ; NB: NOT the account the installer runs as, which is another administrator
+    ; when the UAC prompt asked for different credentials
+    ${If} $AccessUserProbed != 1
+      StrCpy $AccessUserProbed 1
+      nsExec::ExecToStack `powershell -NoProfile -NonInteractive -Command "$$s = (Get-Process -Id $$PID).SessionId; $$p = Get-CimInstance Win32_Process -Filter 'Name=''explorer.exe''' | Where-Object SessionId -eq $$s | Select-Object -First 1; if ($$p) { $$o = Invoke-CimMethod -InputObject $$p -MethodName GetOwner; [Console]::Out.Write($$o.Domain + '\' + $$o.User) }"`
+      Pop $0
+      Pop $1
+      ${If} $0 == "0"
+        StrCpy $AccessUser $1
+      ${EndIf}
+    ${EndIf}
+    ; without a known user there is no "only me" to offer
+    ${IfThen} $AccessUser == "" ${|} Abort ${|}
+
+    !insertmacro MUI_HEADER_TEXT "Choose Users" "Choose who may use Submarine on this computer."
+    nsDialogs::Create 1018
+    Pop $0
+    ${IfThen} $(^RTL) = 1 ${|} nsDialogs::SetRTL $(^RTL) ${|}
+
+    ${NSD_CreateLabel} 0 0 100% 24u "Submarine is installed for the whole computer. Choose who may connect, disconnect and manage the tunnels:"
+    Pop $0
+    ${NSD_CreateRadioButton} 10u 34u -10u 12u "&Anyone who uses this computer"
+    Pop $AccessRadioAll
+    ${NSD_AddStyle} $AccessRadioAll ${WS_GROUP}
+    ${NSD_CreateRadioButton} 10u 50u -10u 12u "Only for &me ($AccessUser)"
+    Pop $AccessRadioOnly
+    ${NSD_CreateLabel} 0 76u 100% 24u "The administrators of this computer may always use Submarine."
+    Pop $0
+
+    ; the previous choice when coming back to the page, every user otherwise
+    ${If} $AccessChoice == "only"
+      ${NSD_Check} $AccessRadioOnly
+    ${Else}
+      ${NSD_Check} $AccessRadioAll
+    ${EndIf}
+
+    nsDialogs::Show
+  FunctionEnd
+
+  Function AccessPageLeave
+    ${NSD_GetState} $AccessRadioOnly $0
+    ${If} $0 = ${BST_CHECKED}
+      StrCpy $AccessChoice "only"
+    ${Else}
+      StrCpy $AccessChoice "all"
+    ${EndIf}
+  FunctionEnd
+!macroend
 
 !macro NSIS_HOOK_PREINSTALL
   ; upgrade: stop and remove the old service, so its files can be replaced
@@ -19,21 +111,12 @@ ${UnStrRep}
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
-  ; who may use the service, asked on the first installation only: an upgrade
-  ; keeps the choice in access.json, and a silent installation allows every user
+  ; who may use the service, as chosen on the access page: an upgrade keeps the
+  ; choice in access.json, and a silent installation allows every user
   ExpandEnvStrings $2 "%ProgramData%\Submarine\access.json"
   IfFileExists "$2" access_done
-    ; the user of this desktop session, as DOMAIN\user
-    ; NB: NOT the account the installer runs as, which is another administrator
-    ; when the UAC prompt asked for different credentials
-    nsExec::ExecToStack `powershell -NoProfile -NonInteractive -Command "$$s = (Get-Process -Id $$PID).SessionId; $$p = Get-CimInstance Win32_Process -Filter 'Name=''explorer.exe''' | Where-Object SessionId -eq $$s | Select-Object -First 1; if ($$p) { $$o = Invoke-CimMethod -InputObject $$p -MethodName GetOwner; [Console]::Out.Write($$o.Domain + '\' + $$o.User) }"`
-    Pop $3
-    Pop $4
-    ; without a known user there is no "only me" to offer
-    StrCmp $3 "0" 0 access_all
-    StrCmp $4 "" access_all
-    MessageBox MB_YESNO|MB_ICONQUESTION "Install Submarine for all the users of this computer?$\r$\n$\r$\nYes: every user may use it.$\r$\nNo: only $4 and the administrators may use it." /SD IDYES IDYES access_all
-      nsExec::ExecToLog '"$INSTDIR\submarine-daemon.exe" access only "$4"'
+    StrCmp $AccessChoice "only" 0 access_all
+      nsExec::ExecToLog '"$INSTDIR\submarine-daemon.exe" access only "$AccessUser"'
       Goto access_done
     access_all:
       nsExec::ExecToLog '"$INSTDIR\submarine-daemon.exe" access all'
