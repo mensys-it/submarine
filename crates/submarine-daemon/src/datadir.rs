@@ -89,22 +89,28 @@ mod windows {
     use std::path::Path;
     use std::ptr;
 
-    use windows_sys::Win32::Foundation::{INVALID_HANDLE_VALUE, LocalFree};
+    use windows_sys::Win32::Foundation::{
+        ERROR_NOT_ALL_ASSIGNED, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LUID, LocalFree,
+    };
     use windows_sys::Win32::Security::Authorization::{
         ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo, SDDL_REVISION_1,
         SE_FILE_OBJECT, SetNamedSecurityInfoW,
     };
     use windows_sys::Win32::Security::{
-        ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, IsWellKnownSid,
-        OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
-        PSID, SECURITY_ATTRIBUTES, WinBuiltinAdministratorsSid, WinLocalSystemSid,
+        ACL, AdjustTokenPrivileges, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl,
+        IsWellKnownSid, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, OWNER_SECURITY_INFORMATION,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_PRIVILEGE_ENABLED,
+        SE_RESTORE_NAME, SECURITY_ATTRIBUTES, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES,
+        TOKEN_QUERY, WinBuiltinAdministratorsSid, WinLocalSystemSid,
     };
     use windows_sys::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, CreateDirectoryW, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
-        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-        FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-        GetFileInformationByHandle, MoveFileExW, OPEN_EXISTING, READ_CONTROL,
+        BY_HANDLE_FILE_INFORMATION, CreateDirectoryW, CreateFileW, DELETE,
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_SHARE_DELETE,
+        FILE_SHARE_READ, FILE_SHARE_WRITE, FileRenameInfo, GetFileInformationByHandle, MoveFileExW,
+        OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE, SetFileInformationByHandle,
     };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
     /// Protected DACL (parent ACEs not inherited) granting full access, inherited by
     /// files and subdirectories, only to SYSTEM (SY) and Administrators (BA).
@@ -248,13 +254,147 @@ mod windows {
     }
 
     /// Renames the entry at `from` to `to`. A link is renamed itself, not followed.
+    /// NB: another user may deny this service any access to a directory they created,
+    /// to keep the service from starting. Such an entry is renamed with the restore
+    /// privilege, which grants the right to delete, and so to rename, whatever the ACL.
     pub(super) fn move_entry(from: &Path, to: &Path) -> io::Result<()> {
-        let (from, to) = (wide(from.as_os_str()), wide(to.as_os_str()));
+        let (wide_from, wide_to) = (wide(from.as_os_str()), wide(to.as_os_str()));
         // SAFETY: valid NUL-terminated paths; no flags, so nothing is replaced.
-        if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 0) } == 0 {
+        if unsafe { MoveFileExW(wide_from.as_ptr(), wide_to.as_ptr(), 0) } != 0 {
+            return Ok(());
+        }
+        let err = io::Error::last_os_error();
+        if err.kind() != io::ErrorKind::PermissionDenied {
+            return Err(err);
+        }
+
+        // the entry itself opened for deletion, with the privilege enabled only meanwhile
+        let _privilege = RestorePrivilege::enable()?;
+        // SAFETY: valid NUL-terminated path; no security attributes nor template file.
+        let raw = unsafe {
+            CreateFileW(
+                wide_from.as_ptr(),
+                DELETE | SYNCHRONIZE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                ptr::null(),
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                ptr::null_mut(),
+            )
+        };
+        if raw == INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: valid handle just opened, owned by nobody else.
+        let handle = unsafe { OwnedHandle::from_raw_handle(raw) };
+        rename_handle(&handle, to)
+    }
+
+    /// Renames the open entry `handle` to the full path `to`, without replacing an
+    /// existing entry.
+    fn rename_handle(handle: &OwnedHandle, to: &Path) -> io::Result<()> {
+        // the new name as a verbatim path, which the kernel takes as it is
+        let mut name: Vec<u16> = r"\\?\".encode_utf16().collect();
+        name.extend(to.as_os_str().encode_wide());
+        let name_bytes = name.len() * 2;
+        // FILE_RENAME_INFO followed by the name, in a buffer aligned for it
+        let size = size_of::<FILE_RENAME_INFO>() + name_bytes;
+        let mut buf = vec![0u64; size.div_ceil(8)];
+        let info = buf.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+        // SAFETY: the buffer is zeroed (no replace, no root directory) and large enough
+        // for the header and the name; the name is written through a raw pointer, as
+        // the field is declared with a single element.
+        unsafe {
+            (&raw mut (*info).FileNameLength).write(name_bytes as u32);
+            ptr::copy_nonoverlapping(
+                name.as_ptr(),
+                (&raw mut (*info).FileName).cast::<u16>(),
+                name.len(),
+            );
+        }
+        // SAFETY: valid handle opened with DELETE, and a buffer of `size` bytes.
+        let ok = unsafe {
+            SetFileInformationByHandle(
+                handle.as_raw_handle(),
+                FileRenameInfo,
+                info.cast(),
+                size as u32,
+            )
+        };
+        if ok == 0 {
             return Err(io::Error::last_os_error());
         }
         Ok(())
+    }
+
+    /// The restore privilege of this process, enabled until drop.
+    struct RestorePrivilege {
+        token: OwnedHandle,
+        luid: LUID,
+    }
+
+    impl RestorePrivilege {
+        /// Enables the privilege, which SYSTEM and administrators hold but keep
+        /// disabled.
+        fn enable() -> io::Result<Self> {
+            let mut token: HANDLE = ptr::null_mut();
+            // SAFETY: pseudo handle of this process and a valid out pointer.
+            let ok = unsafe {
+                OpenProcessToken(
+                    GetCurrentProcess(),
+                    TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+                    &mut token,
+                )
+            };
+            if ok == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: valid handle just opened, owned by nobody else.
+            let token = unsafe { OwnedHandle::from_raw_handle(token) };
+            let mut luid = LUID::default();
+            // SAFETY: valid privilege name and out pointer.
+            if unsafe { LookupPrivilegeValueW(ptr::null(), SE_RESTORE_NAME, &mut luid) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let privilege = Self { token, luid };
+            privilege.set(SE_PRIVILEGE_ENABLED)?;
+            Ok(privilege)
+        }
+
+        /// Sets the attributes of the privilege in the token.
+        fn set(&self, attributes: u32) -> io::Result<()> {
+            let state = TOKEN_PRIVILEGES {
+                PrivilegeCount: 1,
+                Privileges: [LUID_AND_ATTRIBUTES {
+                    Luid: self.luid,
+                    Attributes: attributes,
+                }],
+            };
+            // SAFETY: valid token opened with TOKEN_ADJUST_PRIVILEGES and new state; the
+            // previous state is not needed.
+            let ok = unsafe {
+                AdjustTokenPrivileges(
+                    self.token.as_raw_handle(),
+                    0,
+                    &state,
+                    0,
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                )
+            };
+            // the call succeeds even when the token does not hold the privilege
+            // SAFETY: plain call.
+            if ok == 0 || unsafe { GetLastError() } == ERROR_NOT_ALL_ASSIGNED {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        }
+    }
+
+    impl Drop for RestorePrivilege {
+        fn drop(&mut self) {
+            let _ = self.set(0);
+        }
     }
 
     /// Sets the restricted ACL on `dir`; owner, group and SACL are left unchanged.
