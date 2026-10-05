@@ -35,6 +35,10 @@ pub const DEFAULT_MTU: u16 = 1420;
 const TIMER_TICK: Duration = Duration::from_millis(250);
 /// Size of the packet buffers: the largest possible IP packet / UDP datagram.
 const BUF_SIZE: usize = 65536;
+/// Consecutive failed writes to the TUN device after which it is considered gone and
+/// the tunnel stops. Isolated failures (a full queue, a packet the OS rejects) only
+/// drop that packet.
+const MAX_TUN_WRITE_ERRORS: u32 = 100;
 /// Message type of a cookie reply, the first byte of the datagram.
 const COOKIE_REPLY: u8 = 3;
 /// Handshake messages per second, across all peers, above which a valid cookie
@@ -399,6 +403,7 @@ async fn tun_loop(shared: Arc<Shared>) -> io::Result<()> {
 async fn udp_loop(shared: Arc<Shared>) -> io::Result<()> {
     let mut src = vec![0u8; BUF_SIZE];
     let mut dst = vec![0u8; BUF_SIZE];
+    let mut write_errors = WriteErrors::default();
     loop {
         // datagrams not belonging to any known peer are dropped
         let (len, from) = shared.socket.recv_from(&mut src).await?;
@@ -445,10 +450,35 @@ async fn udp_loop(shared: Arc<Shared>) -> io::Result<()> {
                     peer.set_endpoint(from);
                     // packets whose source is not in this peer's AllowedIPs are dropped
                     if shared.router.lookup(src_ip) == Some(peer_idx) {
-                        shared.device.send(&dst[range]).await?;
+                        write_errors.check(shared.device.send(&dst[range]).await)?;
                     }
                     break;
                 }
+            }
+        }
+    }
+}
+
+/// Count of consecutive failed writes to the TUN device, see [`MAX_TUN_WRITE_ERRORS`].
+#[derive(Default)]
+struct WriteErrors(u32);
+
+impl WriteErrors {
+    /// Records the result of a write: an error is returned only once
+    /// [`MAX_TUN_WRITE_ERRORS`] writes in a row have failed.
+    fn check(&mut self, result: io::Result<usize>) -> io::Result<()> {
+        match result {
+            Ok(_) => {
+                self.0 = 0;
+                Ok(())
+            }
+            Err(err) => {
+                self.0 += 1;
+                if self.0 >= MAX_TUN_WRITE_ERRORS {
+                    return Err(err);
+                }
+                tracing::debug!("packet dropped, cannot write it to the TUN device: {err}");
+                Ok(())
             }
         }
     }
@@ -613,6 +643,22 @@ mod tests {
         };
         assert_eq!(dst[range.start], COOKIE_REPLY);
         assert!(!roams(&dst[range]));
+    }
+
+    // isolated write errors are tolerated, a long run of them stops the tunnel
+    #[test]
+    fn tun_write_errors() {
+        let failure = || Err(io::Error::from(io::ErrorKind::TimedOut));
+        let mut errors = WriteErrors::default();
+        for _ in 0..MAX_TUN_WRITE_ERRORS - 1 {
+            assert!(errors.check(failure()).is_ok());
+        }
+        // a success resets the count
+        assert!(errors.check(Ok(1)).is_ok());
+        for _ in 0..MAX_TUN_WRITE_ERRORS - 1 {
+            assert!(errors.check(failure()).is_ok());
+        }
+        assert!(errors.check(failure()).is_err());
     }
 
     // a handshake response, produced only for an authenticated initiation, roams
