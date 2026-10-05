@@ -152,8 +152,19 @@ define_windows_service!(ffi_service_main, service_main);
 /// environment and the defaults. Logs go to `daemon.log` in the data directory.
 fn service_main(_arguments: Vec<OsString>) {
     let config = Config::from_args(&[]);
-    let _ = std::fs::create_dir_all(&config.data_dir);
-    init_logging(Some(&config.data_dir.join("daemon.log")));
+    // the log file is opened ONLY in a data directory that is safe to write as SYSTEM
+    let prepared = crate::datadir::prepare(&config.data_dir);
+    let log_file = config.data_dir.join("daemon.log");
+    init_logging(prepared.is_ok().then_some(log_file.as_path()));
+    match prepared {
+        Ok(Some(aside)) => tracing::warn!(
+            "{} was not created by the service: moved to {}",
+            config.data_dir.display(),
+            aside.display()
+        ),
+        Ok(None) => {}
+        Err(err) => tracing::error!("cannot prepare the data directory: {err}"),
+    }
     if let Err(err) = run_service(config) {
         tracing::error!("service failed: {err}");
     }

@@ -167,7 +167,8 @@ all'eseguibile:
 - Kill switch con filtri WFP persistenti.
 - La named pipe è accessibile solo agli utenti connessi in modo interattivo, che non possono
   crearne istanze; i client rifiutano una pipe che non appartiene a SYSTEM o Administrators.
-  La cartella `ProgramData\Submarine` è accessibile solo a SYSTEM e Administrators.
+  La cartella `ProgramData\Submarine` è accessibile solo a SYSTEM e Administrators; se un
+  altro utente la crea prima del servizio, viene spostata da parte e sostituita.
 - Tunnel salvati cifrati con una chiave protetta da DPAPI, legata al computer.
 - Log del servizio in `ProgramData\Submarine\daemon.log`.
 - Tunnel per app: driver kernel in `third_party/win-split-tunnel` (fork del driver di Mullvad),

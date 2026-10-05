@@ -68,11 +68,16 @@ impl TunnelStore {
     /// # Errors
     /// Fails if the directories cannot be created or their permissions set.
     pub fn open(data_dir: &Path) -> io::Result<Self> {
-        std::fs::create_dir_all(data_dir)?;
-        restrict(data_dir, 0o700)?;
         let dir = data_dir.join("tunnels");
-        std::fs::create_dir_all(&dir)?;
-        restrict(&dir, 0o700)?;
+        for path in [data_dir, &dir] {
+            if let Some(aside) = crate::datadir::prepare(path)? {
+                tracing::warn!(
+                    "{} was not created by the service: moved to {}",
+                    path.display(),
+                    aside.display()
+                );
+            }
+        }
         let vault = Vault::open(data_dir).map_err(|err| {
             tracing::error!("cannot unlock the stored tunnels: {err}");
             err.to_string()
@@ -311,86 +316,6 @@ pub(crate) fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
     file.write_all(data)?;
     file.sync_all()?;
     std::fs::rename(&tmp, path)
-}
-
-/// Unix: sets the permission bits of `path` to `mode`.
-#[cfg(unix)]
-fn restrict(path: &Path, mode: u32) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
-}
-
-/// Windows: only SYSTEM and Administrators may access the directory; files
-/// created inside inherit the ACL. `ProgramData` would otherwise let every
-/// user read the private keys.
-#[cfg(windows)]
-fn restrict(path: &Path, _mode: u32) -> io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-
-    use windows_sys::Win32::Foundation::LocalFree;
-    use windows_sys::Win32::Security::Authorization::{
-        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1, SE_FILE_OBJECT,
-        SetNamedSecurityInfoW,
-    };
-    use windows_sys::Win32::Security::{
-        ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl,
-        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
-    };
-
-    // files inherit the ACL from their directory
-    if !path.is_dir() {
-        return Ok(());
-    }
-    // protected DACL (parent ACEs not inherited) granting full access, inherited
-    // by files and subdirectories, only to SYSTEM (SY) and Administrators (BA)
-    let sddl: Vec<u16> = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
-        .encode_utf16()
-        .chain([0])
-        .collect();
-    let wide_path: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
-    let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
-    // SAFETY: valid NUL-terminated SDDL and out pointer.
-    let ok = unsafe {
-        ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            sddl.as_ptr(),
-            SDDL_REVISION_1,
-            &mut sd,
-            std::ptr::null_mut(),
-        )
-    };
-    if ok == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    // extraction of the DACL from the descriptor and its application to the path
-    let (mut present, mut defaulted) = (0, 0);
-    let mut dacl: *mut ACL = std::ptr::null_mut();
-    // SAFETY: `sd` was allocated above; out pointers are valid.
-    let result =
-        if unsafe { GetSecurityDescriptorDacl(sd, &mut present, &mut dacl, &mut defaulted) } == 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            // SAFETY: valid path and DACL; owner, group and SACL are left unchanged.
-            let code = unsafe {
-                SetNamedSecurityInfoW(
-                    wide_path.as_ptr(),
-                    SE_FILE_OBJECT,
-                    DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    dacl,
-                    std::ptr::null(),
-                )
-            };
-            if code == 0 {
-                Ok(())
-            } else {
-                Err(io::Error::from_raw_os_error(code as i32))
-            }
-        };
-    // SAFETY: allocated by ConvertStringSecurityDescriptorToSecurityDescriptorW and
-    // freed exactly once, after its last use.
-    unsafe { LocalFree(sd) };
-    result
 }
 
 #[cfg(test)]

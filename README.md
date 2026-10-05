@@ -166,7 +166,8 @@ executable:
 - Kill switch with persistent WFP filters.
 - The named pipe is accessible only to interactively logged-on users, who cannot create
   instances of it; clients refuse a pipe not owned by SYSTEM or Administrators. The
-  `ProgramData\Submarine` folder is accessible only to SYSTEM and Administrators.
+  `ProgramData\Submarine` folder is accessible only to SYSTEM and Administrators; one
+  created by another user before the service is moved aside and replaced.
 - Stored tunnels encrypted with a key protected by DPAPI, bound to the computer.
 - Service log in `ProgramData\Submarine\daemon.log`.
 - Per-app tunnel: kernel driver in `third_party/win-split-tunnel` (fork of the Mullvad

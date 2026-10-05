@@ -12,6 +12,7 @@
 //! `--socket` and `--data-dir` can also be set with SUBMARINE_SOCKET and
 //! SUBMARINE_DATA_DIR.
 
+mod datadir;
 mod logbuf;
 mod server;
 mod service;
