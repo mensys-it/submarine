@@ -1,0 +1,40 @@
+# Builds the Windows split tunnel driver on a GitHub-hosted Windows runner, which
+# ships Visual Studio 2022 and the WDK. The driver is test-signed: see
+# third_party/win-split-tunnel/BUILDING.md for test machines and signing.
+name: windows-driver
+
+# Triggers
+# changes to the driver or to its build, and runs started by hand
+on:
+  push:
+    paths:
+      - "third_party/win-split-tunnel/**"
+      - "scripts/windows/build-driver.ps1"
+      - ".github/workflows/windows-driver.yml"
+  pull_request:
+    paths:
+      - "third_party/win-split-tunnel/**"
+      - "scripts/windows/build-driver.ps1"
+  workflow_dispatch:
+
+# Jobs
+# the signed driver and, for self-signed builds, its certificate, as one artifact
+jobs:
+  driver:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test-sign the driver
+        shell: pwsh
+        env:
+          # optional: a fixed test certificate, so that testers trust it only once
+          SUBMARINE_DRIVER_PFX: ${{ secrets.SUBMARINE_DRIVER_PFX }}
+          SUBMARINE_DRIVER_PFX_PASSWORD: ${{ secrets.SUBMARINE_DRIVER_PFX_PASSWORD }}
+        run: .\scripts\windows\build-driver.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: submarine-split-tunnel-driver
+          path: dist/driver/
+          if-no-files-found: error

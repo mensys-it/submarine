@@ -181,7 +181,8 @@ all'eseguibile:
 - Log del servizio in `ProgramData\Submarine\daemon.log`, spostato in `daemon.log.old` oltre i
   10 MB.
 - Tunnel per app: driver kernel in `third_party/win-split-tunnel` (fork del driver di Mullvad),
-  compilato e firmato in modalità test da GitHub Actions su un runner Windows ospitato. Se
+  compilato e firmato in modalità test da GitHub Actions su un runner Windows ospitato. Il
+  servizio lo carica da `submarine-split-tunnel.sys` accanto a `submarine-daemon.exe`. Se
   `dist/driver/submarine-split-tunnel.sys` esiste, `build-windows.sh` lo include
   nell'installer. In modalità "solo le app scelte" le app scelte non raggiungono la rete
   locale e, con il kill switch, sono bloccate fuori dal tunnel anche se il driver non funziona.
@@ -190,9 +191,12 @@ all'eseguibile:
 
 </details>
 
-**Limiti attuali:** il driver è firmato solo per i test (per distribuirlo servono certificato
-EV e attestation signing Microsoft); il cambio di rete è seguito solo per endpoint IPv4;
-l'installer non è firmato (SmartScreen lo segnalerà).
+**Limiti attuali:** l'installer non include il driver del tunnel per app, che non è ancora
+firmato da Microsoft (servono certificato EV e attestation signing Microsoft). Per usare il
+tunnel per app, compila il driver da te e usalo con Windows in modalità test, come descritto
+in [`third_party/win-split-tunnel/BUILDING.it.md`](third_party/win-split-tunnel/BUILDING.it.md).
+Il cambio di rete è seguito solo per endpoint IPv4; l'installer non è firmato (SmartScreen
+lo segnalerà).
 
 ## macOS
 

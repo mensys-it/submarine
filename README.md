@@ -179,7 +179,8 @@ executable:
 - Stored tunnels encrypted with a key protected by DPAPI, bound to the computer.
 - Service log in `ProgramData\Submarine\daemon.log`, moved to `daemon.log.old` past 10 MB.
 - Per-app tunnel: kernel driver in `third_party/win-split-tunnel` (fork of the Mullvad
-  driver), built and test-signed by GitHub Actions on a hosted Windows runner. If
+  driver), built and test-signed by GitHub Actions on a hosted Windows runner. The service
+  loads it from `submarine-split-tunnel.sys` next to `submarine-daemon.exe`. If
   `dist/driver/submarine-split-tunnel.sys` exists, `build-windows.sh` includes it in the
   installer. In "only the chosen apps" mode the chosen apps do not reach the local network,
   and with the kill switch they are blocked outside the tunnel even if the driver fails.
@@ -188,9 +189,12 @@ executable:
 
 </details>
 
-**Current limits:** the driver is signed for testing only (distribution requires an EV
-certificate and Microsoft attestation signing); network changes are followed only for IPv4
-endpoints; the installer is not signed (SmartScreen will flag it).
+**Current limits:** the installer does not include the per-app tunnel driver, which is not
+signed by Microsoft yet (that requires an EV certificate and Microsoft attestation signing).
+To use the per-app tunnel, build the driver yourself and run it with Windows in test mode, as
+described in [`third_party/win-split-tunnel/BUILDING.md`](third_party/win-split-tunnel/BUILDING.md).
+Network changes are followed only for IPv4 endpoints; the installer is not signed
+(SmartScreen will flag it).
 
 ## macOS
 

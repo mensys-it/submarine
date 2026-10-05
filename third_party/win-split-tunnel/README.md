@@ -16,4 +16,5 @@ swapped by the user-mode agent (`crates/submarine-net/src/windows/split.rs`):
 the chosen apps are then redirected *to* the tunnel and blocked outside it.
 
 Build: `scripts/windows/build-driver.ps1` (Visual Studio 2022 + WDK), also run by
-the GitHub Actions workflow `.github/workflows/windows-driver.yml`.
+the GitHub Actions workflow `.github/workflows/windows-driver.yml`. How to build,
+test-sign and install it: [`BUILDING.md`](BUILDING.md).
