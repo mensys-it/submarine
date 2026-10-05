@@ -35,6 +35,8 @@ pub const DEFAULT_MTU: u16 = 1420;
 const TIMER_TICK: Duration = Duration::from_millis(250);
 /// Size of the packet buffers: the largest possible IP packet / UDP datagram.
 const BUF_SIZE: usize = 65536;
+/// Message type of a cookie reply, the first byte of the datagram.
+const COOKIE_REPLY: u8 = 3;
 /// Handshake messages per second, across all peers, above which a valid cookie
 /// (proof that the sender receives at its source address) is required.
 /// NB: every handshake message is counted twice, by [`udp_loop`] and again by boringtun
@@ -432,7 +434,9 @@ async fn udp_loop(shared: Arc<Shared>) -> io::Result<()> {
                 Action::None => break,
                 // any authenticated datagram updates the peer endpoint (roaming)
                 Action::Network(range) => {
-                    peer.set_endpoint(from);
+                    if roams(&dst[range.clone()]) {
+                        peer.set_endpoint(from);
+                    }
                     send_best_effort(&shared, peer, &dst[range], from).await;
                     // flush of the packets queued while the handshake was in progress
                     input = &[];
@@ -448,6 +452,15 @@ async fn udp_loop(shared: Arc<Shared>) -> io::Result<()> {
             }
         }
     }
+}
+
+/// Whether the reply boringtun produced for an incoming datagram proves that the
+/// datagram was authenticated, so its source can become the peer endpoint.
+/// NB: a cookie reply does NOT. It only needs a valid MAC1, which anyone knowing our
+/// public key can compute, so roaming on it would let a spoofed source hijack the
+/// endpoint and redirect the whole tunnel.
+fn roams(reply: &[u8]) -> bool {
+    reply.first() != Some(&COOKIE_REPLY)
 }
 
 /// Outcome of [`gate`] for an incoming datagram.
@@ -513,7 +526,6 @@ async fn send_best_effort(shared: &Shared, peer: &Peer, buf: &[u8], to: SocketAd
 /// handshake initiations, from the initiator's static key.
 fn find_peer(shared: &Shared, datagram: &[u8]) -> Option<usize> {
     const HANDSHAKE_RESPONSE: u8 = 2;
-    const COOKIE_REPLY: u8 = 3;
     const DATA: u8 = 4;
 
     // the message type is the first byte; responses, cookie replies and data messages
@@ -599,6 +611,30 @@ mod tests {
         let Gate::Cookie(range) = gate(&limiter, from, &packet, &mut dst) else {
             panic!("no cookie under load");
         };
-        assert_eq!(dst[range.start], 3);
+        assert_eq!(dst[range.start], COOKIE_REPLY);
+        assert!(!roams(&dst[range]));
+    }
+
+    // a handshake response, produced only for an authenticated initiation, roams
+    #[test]
+    fn handshake_response_roams() {
+        let ours = x25519::StaticSecret::from([1u8; 32]);
+        let (_, mut peer) = keys();
+        let mut local = Tunn::new(
+            ours,
+            x25519::PublicKey::from(&x25519::StaticSecret::from([2u8; 32])),
+            None,
+            None,
+            0,
+            None,
+        );
+        let packet = initiation(&mut peer);
+        let mut dst = vec![0u8; BUF_SIZE];
+        let from: IpAddr = "203.0.113.7".parse().unwrap();
+        let TunnResult::WriteToNetwork(reply) = local.decapsulate(Some(from), &packet, &mut dst)
+        else {
+            panic!("no handshake response");
+        };
+        assert!(roams(reply));
     }
 }
