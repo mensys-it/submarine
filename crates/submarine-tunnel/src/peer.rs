@@ -25,8 +25,8 @@ pub(crate) struct Peer {
     pub tunn: Mutex<Tunn>,
     /// Updated to the source of the latest authenticated packet (roaming).
     pub endpoint: RwLock<Option<SocketAddr>>,
-    /// Time of the first handshake initiation sent since the latest completed
-    /// handshake: how long the peer has left us waiting for an answer.
+    /// Time of the first handshake initiation sent since the peer last answered:
+    /// how long the peer has left us waiting for an answer.
     handshake_sent: Mutex<Option<Instant>>,
 }
 
@@ -79,6 +79,19 @@ impl Peer {
                 .unwrap()
                 .get_or_insert_with(Instant::now);
         }
+    }
+
+    /// Records an authenticated datagram from the peer: the peer is answering,
+    /// so the wait for a handshake response ends.
+    ///
+    /// NB: the completion time reported by boringtun is NOT enough to end the
+    /// wait. boringtun stamps it with the time of the latest `update_timers`
+    /// call, up to one timer tick earlier than the real one: a response arriving
+    /// within the same tick as the initiation looks older than the initiation
+    /// itself, and the server would be reported as silent after a working
+    /// handshake.
+    pub fn note_answered(&self) {
+        *self.handshake_sent.lock().unwrap() = None;
     }
 
     /// Snapshot of the peer statistics; the handshake age is converted to a wall-clock time.

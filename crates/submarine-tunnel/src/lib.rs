@@ -437,10 +437,12 @@ async fn udp_loop(shared: Arc<Shared>) -> io::Result<()> {
             };
             match action {
                 Action::None => break,
-                // any authenticated datagram updates the peer endpoint (roaming)
+                // any authenticated datagram updates the peer endpoint (roaming) and
+                // proves that the peer is answering
                 Action::Network(range) => {
                     if roams(&dst[range.clone()]) {
                         peer.set_endpoint(from);
+                        peer.note_answered();
                     }
                     send_best_effort(&shared, peer, &dst[range], from).await;
                     // flush of the packets queued while the handshake was in progress
@@ -448,6 +450,7 @@ async fn udp_loop(shared: Arc<Shared>) -> io::Result<()> {
                 }
                 Action::Tunnel(range, src_ip) => {
                     peer.set_endpoint(from);
+                    peer.note_answered();
                     // packets whose source is not in this peer's AllowedIPs are dropped
                     if shared.router.lookup(src_ip) == Some(peer_idx) {
                         write_errors.check(shared.device.send(&dst[range]).await)?;
