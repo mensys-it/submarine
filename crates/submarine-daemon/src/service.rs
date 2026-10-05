@@ -304,6 +304,9 @@ impl Service {
             Request::UpdateTunnel { id, name, config } => self.update(&id, &name, &config).await,
             Request::DeleteTunnel { id } => self.delete(&id).await,
             Request::Connect { id } => {
+                // the tunnel must exist before it is recorded for the next start: an
+                // unknown id would otherwise replace the one to restore
+                self.store.get(&id).map_err(err)?;
                 self.store.save_connected_tunnel(Some(&id)).map_err(err)?;
                 self.connect(&id, Attempt::User, None)
                     .await
