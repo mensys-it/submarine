@@ -15,7 +15,9 @@
 ${UnStrRep}
 
 ; Access page: who may use the service, chosen with two radio buttons right before
-; the installation starts.
+; the installation starts. On an upgrade the current choice is preselected, and
+; access.json is rewritten ONLY if it changes, so that a list of users set with
+; `submarine-daemon access only ...` survives a plain "Next".
 ;
 ; Tauri has hooks for the install and uninstall sections, but NOT for the pages, so
 ; MUI_PAGE_INSTFILES is redefined to declare the access page in front of the
@@ -39,26 +41,48 @@ ${UnStrRep}
 !macro SUBMARINE_ACCESS_PAGE
   ; "all" or "only", empty when the page was skipped
   Var AccessChoice
+  ; "all" or "only" as found in access.json, empty without a readable file
+  Var AccessCurrent
   ; user of this desktop session as DOMAIN\user, empty when unknown
   Var AccessUser
-  ; whether $AccessUser was already looked up
-  Var AccessUserProbed
+  ; whether $AccessUser and $AccessCurrent were already looked up
+  Var AccessProbed
   Var AccessRadioAll
   Var AccessRadioOnly
 
   Page custom AccessPageShow AccessPageLeave
 
   Function AccessPageShow
-    ; skipped in passive mode and on an upgrade, which keeps the choice in access.json
+    ; skipped in passive mode, which keeps the current choice
     ${IfThen} $PassiveMode = 1 ${|} Abort ${|}
-    ExpandEnvStrings $0 "%ProgramData%\Submarine\access.json"
-    ${IfThen} ${FileExists} "$0" ${|} Abort ${|}
 
-    ; the user of this desktop session, looked up once even if the page is shown again
-    ; NB: NOT the account the installer runs as, which is another administrator
-    ; when the UAC prompt asked for different credentials
-    ${If} $AccessUserProbed != 1
-      StrCpy $AccessUserProbed 1
+    ; lookups done once, even if the page is shown again
+    ${If} $AccessProbed != 1
+      StrCpy $AccessProbed 1
+
+      ; the current choice: every user when the file stores `"allowed_users": null`
+      ; NB: the data directory is open to the Administrators, so the elevated
+      ; installer can read it
+      ExpandEnvStrings $0 "%ProgramData%\Submarine\access.json"
+      ClearErrors
+      FileOpen $0 "$0" r
+      ${IfNot} ${Errors}
+        StrCpy $AccessCurrent "only"
+        ${Do}
+          FileRead $0 $1
+          ${IfThen} ${Errors} ${|} ${ExitDo} ${|}
+          ${StrLoc} $2 "$1" '"allowed_users": null' ">"
+          ${If} $2 != ""
+            StrCpy $AccessCurrent "all"
+          ${EndIf}
+        ${Loop}
+        FileClose $0
+      ${EndIf}
+      StrCpy $AccessChoice $AccessCurrent
+
+      ; the user of this desktop session
+      ; NB: NOT the account the installer runs as, which is another administrator
+      ; when the UAC prompt asked for different credentials
       nsExec::ExecToStack `powershell -NoProfile -NonInteractive -Command "$$s = (Get-Process -Id $$PID).SessionId; $$p = Get-CimInstance Win32_Process -Filter 'Name=''explorer.exe''' | Where-Object SessionId -eq $$s | Select-Object -First 1; if ($$p) { $$o = Invoke-CimMethod -InputObject $$p -MethodName GetOwner; [Console]::Out.Write($$o.Domain + '\' + $$o.User) }"`
       Pop $0
       Pop $1
@@ -84,7 +108,7 @@ ${UnStrRep}
     ${NSD_CreateLabel} 0 76u 100% 24u "The administrators of this computer may always use Submarine."
     Pop $0
 
-    ; the previous choice when coming back to the page, every user otherwise
+    ; the choice made so far or found in access.json, every user otherwise
     ${If} $AccessChoice == "only"
       ${NSD_Check} $AccessRadioOnly
     ${Else}
@@ -111,10 +135,14 @@ ${UnStrRep}
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
-  ; who may use the service, as chosen on the access page: an upgrade keeps the
-  ; choice in access.json, and a silent installation allows every user
-  ExpandEnvStrings $2 "%ProgramData%\Submarine\access.json"
-  IfFileExists "$2" access_done
+  ; who may use the service, as chosen on the access page; without the page
+  ; (passive mode, unknown user) an upgrade keeps access.json and a first
+  ; installation allows every user
+  StrCmp $AccessChoice "" 0 access_chosen
+    ExpandEnvStrings $2 "%ProgramData%\Submarine\access.json"
+    IfFileExists "$2" access_done access_all
+  access_chosen:
+    StrCmp $AccessChoice $AccessCurrent access_done
     StrCmp $AccessChoice "only" 0 access_all
       nsExec::ExecToLog '"$INSTDIR\submarine-daemon.exe" access only "$AccessUser"'
       Goto access_done
