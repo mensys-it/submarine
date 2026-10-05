@@ -987,8 +987,9 @@ fn imported(id: String, name: &str, parsed: submarine_config::Parsed) -> Respons
 }
 
 /// Checks the settings sent by a client: the tunnels they name must exist, the
-/// split tunneling apps must be at most `MAX_SPLIT_APPS`, with absolute paths,
-/// and the trusted networks at most `MAX_TRUSTED_NETWORKS` valid SSIDs.
+/// split tunneling apps must be at most `MAX_SPLIT_APPS`, with absolute paths (on
+/// Windows, paths on a drive), and the trusted networks at most
+/// `MAX_TRUSTED_NETWORKS` valid SSIDs.
 fn validate(store: &TunnelStore, settings: &Settings) -> Result<()> {
     if let Some(id) = &settings.auto_connect
         && store.get(id).is_err()
@@ -1016,11 +1017,30 @@ fn validate(store: &TunnelStore, settings: &Settings) -> Result<()> {
         return Err(format!("at most {MAX_SPLIT_APPS} apps can be listed"));
     }
     for app in &settings.split_apps {
-        if !std::path::Path::new(&app.path).is_absolute() {
-            return Err(format!("app path must be absolute: {}", app.path));
+        // on Windows ONLY paths on a drive: UNC and device paths would make this service,
+        // running as SYSTEM, reach other hosts or devices when it resolves the app
+        let valid = if cfg!(windows) {
+            is_drive_path(&app.path)
+        } else {
+            std::path::Path::new(&app.path).is_absolute()
+        };
+        if !valid {
+            let rule = if cfg!(windows) {
+                "on a drive"
+            } else {
+                "absolute"
+            };
+            return Err(format!("app path must be {rule}: {}", app.path));
         }
     }
     Ok(())
+}
+
+/// Whether `path` has the `X:\...` form of a Windows path on a drive. UNC paths
+/// (`\\server\share`) and device paths (`\\?\`, `\\.\`) do not.
+fn is_drive_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() > 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\'
 }
 
 /// Starts the tunnel and applies its routes and DNS.
@@ -1160,6 +1180,24 @@ fn err(e: impl std::fmt::Display) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // only `X:\...` paths count as paths on a drive, not UNC nor device paths
+    #[test]
+    fn drive_paths_only() {
+        assert!(is_drive_path(r"C:\Program Files\App\app.exe"));
+        assert!(is_drive_path(r"d:\app.exe"));
+        for path in [
+            r"\\attacker\share\app.exe",
+            r"\\attacker@80\share\app.exe",
+            r"\\?\C:\app.exe",
+            r"\\.\pipe\app",
+            r"C:app.exe",
+            r"C:\",
+            "/usr/bin/app",
+        ] {
+            assert!(!is_drive_path(path), "{path}");
+        }
+    }
 
     use submarine_config::PublicKey;
 

@@ -203,9 +203,32 @@ pub(crate) fn to_device_path(dos_path: &str, drive_device: &str) -> Option<Strin
     (drive.ends_with(':') && rest.starts_with('\\')).then(|| format!("{drive_device}{rest}"))
 }
 
+/// WFP app id of an executable, from its NT device path: NUL-terminated UTF-16, lowercase
+/// in ASCII ONLY. It is what `FwpmGetAppIdFromFileName0` returns, checked on Windows 11:
+/// the path is not otherwise normalized (short names stay as they are) and non-ASCII
+/// letters keep their case.
+pub(crate) fn app_id(device_path: &str) -> Vec<u16> {
+    device_path
+        .to_ascii_lowercase()
+        .encode_utf16()
+        .chain([0])
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ASCII letters are lowercased, the others keep their case, and a NUL ends the id
+    #[test]
+    fn app_id_matches_the_system_api() {
+        let id = app_id(r"\Device\HarddiskVolume3\Users\USERNA~1\ÀÉ\NOTEPAD.EXE");
+        let text = String::from_utf16(&id).unwrap();
+        assert_eq!(
+            text,
+            "\\device\\harddiskvolume3\\users\\userna~1\\ÀÉ\\notepad.exe\0"
+        );
+    }
 
     // the codes match CTL_CODE(0x8000, function, method, FILE_ANY_ACCESS)
     #[test]

@@ -276,7 +276,7 @@ fn interface_addresses(
 /// Converts `C:\...` to `\Device\HarddiskVolumeN\...`, as the driver matches
 /// images by NT device path. Returns `None` (with a warning when the drive is
 /// unknown) if the path cannot be converted.
-fn device_path(path: &Path) -> Option<String> {
+pub(super) fn device_path(path: &Path) -> Option<String> {
     // device name of the drive letter, e.g. `\Device\HarddiskVolume3` for `C:`
     let text = path.to_str()?;
     let drive = wide(text.get(..2)?);

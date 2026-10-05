@@ -210,7 +210,7 @@ fn apply_blocking(p: &FirewallPolicy) -> Result<()> {
                 permit("Submarine: tunnel", &[Cond::LocalInterface(luid)])?;
             }
             // encrypted tunnel traffic comes from this service
-            permit("Submarine: service", &[Cond::AppId(app_id.0)])?;
+            permit("Submarine: service", &[Cond::AppId(app_id.blob())])?;
 
             // DHCP client and server ports of the layer's family
             let (client, server) = if v6 { (546, 547) } else { (68, 67) };
@@ -276,20 +276,20 @@ fn block_apps(engine: &Engine, p: &FirewallPolicy) -> Result<()> {
             }
         };
         for (layer, v6) in layers {
-            let app_cond = Cond::AppId(app.0);
+            let app_cond = Cond::AppId(app.blob());
             // loopback for this app, above its block (the other apps are not blocked)
             engine.add_filter(
                 &layer,
                 "Submarine: app loopback",
                 WEIGHT_PERMIT_TUNNEL,
                 FWP_ACTION_PERMIT,
-                &[Cond::AppId(app.0), Cond::Loopback],
+                &[Cond::AppId(app.blob()), Cond::Loopback],
             )?;
             // LAN for this app, above its block
             if p.allow_lan {
                 if v6 {
                     for &(addr, len) in LAN_V6 {
-                        let conds = [Cond::AppId(app.0), Cond::RemoteV6(addr, len)];
+                        let conds = [Cond::AppId(app.blob()), Cond::RemoteV6(addr, len)];
                         engine.add_filter(
                             &layer,
                             "Submarine: app LAN",
@@ -300,7 +300,7 @@ fn block_apps(engine: &Engine, p: &FirewallPolicy) -> Result<()> {
                     }
                 } else {
                     for &(addr, len) in LAN_V4 {
-                        let conds = [Cond::AppId(app.0), Cond::RemoteV4(addr, len)];
+                        let conds = [Cond::AppId(app.blob()), Cond::RemoteV4(addr, len)];
                         engine.add_filter(
                             &layer,
                             "Submarine: app LAN",
@@ -544,18 +544,20 @@ impl Drop for Engine {
     }
 }
 
-/// App id of an executable, freed on drop.
-struct AppId(*mut FWP_BYTE_BLOB);
+/// App id of an executable: the blob that WFP compares with the image of a process.
+enum AppId {
+    /// Returned by `FwpmGetAppIdFromFileName0`, freed on drop.
+    Api(*mut FWP_BYTE_BLOB),
+    /// Computed from the path; the blob points into the UTF-16 text, which is boxed
+    /// with it so that both stay where they are.
+    Computed(Box<(FWP_BYTE_BLOB, Vec<u16>)>),
+}
 
 impl AppId {
-    /// App id of this service's executable.
+    /// App id of this service's executable, from the system API: its path is NOT
+    /// user-controlled, and a wrong id would block the tunnel's own traffic.
     fn current_exe() -> Result<Self> {
-        Self::from_path(&std::env::current_exe()?)
-    }
-
-    /// App id of the executable at `path`, which must exist.
-    fn from_path(path: &std::path::Path) -> Result<Self> {
-        let path = wide(&path.to_string_lossy());
+        let path = wide(&std::env::current_exe()?.to_string_lossy());
         let mut blob: *mut FWP_BYTE_BLOB = ptr::null_mut();
         // SAFETY: valid path and out pointer.
         let code = unsafe { FwpmGetAppIdFromFileName0(path.as_ptr(), &mut blob) };
@@ -565,14 +567,48 @@ impl AppId {
                 code,
             });
         }
-        Ok(Self(blob))
+        Ok(Self::Api(blob))
+    }
+
+    /// App id of the executable at `path`, a `X:\...` path chosen by the user.
+    /// NB: computed WITHOUT opening the file, unlike `FwpmGetAppIdFromFileName0`. This
+    /// service runs as SYSTEM, and a path through a junction and an object manager
+    /// link, which any user can create, could make it open a UNC path and send the
+    /// machine account's NTLM credentials to another host.
+    fn from_path(path: &std::path::Path) -> Result<Self> {
+        let device = super::split::device_path(path).ok_or_else(|| {
+            NetError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "not a path on a local drive",
+            ))
+        })?;
+        let text = crate::split_driver::app_id(&device);
+        let mut owned = Box::new((
+            FWP_BYTE_BLOB {
+                size: (text.len() * 2) as u32,
+                data: ptr::null_mut(),
+            },
+            text,
+        ));
+        owned.0.data = owned.1.as_mut_ptr().cast();
+        Ok(Self::Computed(owned))
+    }
+
+    /// The blob to put in a filter condition, valid as long as `self`.
+    fn blob(&self) -> *mut FWP_BYTE_BLOB {
+        match self {
+            Self::Api(blob) => *blob,
+            Self::Computed(owned) => ptr::from_ref(&owned.0).cast_mut(),
+        }
     }
 }
 
 impl Drop for AppId {
     fn drop(&mut self) {
-        // SAFETY: allocated by FwpmGetAppIdFromFileName0.
-        unsafe { FwpmFreeMemory0(&mut self.0 as *mut _ as *mut *mut core::ffi::c_void) };
+        if let Self::Api(blob) = self {
+            // SAFETY: allocated by FwpmGetAppIdFromFileName0 and freed only here.
+            unsafe { FwpmFreeMemory0(blob as *mut _ as *mut *mut core::ffi::c_void) };
+        }
     }
 }
 
