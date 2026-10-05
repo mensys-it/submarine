@@ -12,6 +12,8 @@ mod transport;
 #[cfg(windows)]
 mod winpipe;
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use submarine_config::TunnelConfig;
 
@@ -19,7 +21,8 @@ pub use client::{Client, ClientError};
 pub use transport::{Connection, Listener, bind, read_message, socket_path, write_message};
 
 /// A command sent by a client; serialized as `{"method": ..., "params": ...}`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Its `Debug` output leaves out the configuration text, see the impl below.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum Request {
     /// Current connection status, answered with [`Response::Status`].
@@ -68,6 +71,34 @@ pub enum Request {
     GetLogs,
     /// Empties the in-memory log buffer. The log file is left as it is.
     ClearLogs,
+}
+
+/// Written by hand so that the `.conf` text of `ImportTunnel` and `UpdateTunnel`, which
+/// holds the private keys, never ends up in logs (the daemon logs every request at debug
+/// level, and log lines are pushed to every client). The other requests carry no
+/// secrets and are shown as their JSON.
+impl fmt::Debug for Request {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ImportTunnel { name, config: _ } => f
+                .debug_struct("ImportTunnel")
+                .field("name", name)
+                .finish_non_exhaustive(),
+            Self::UpdateTunnel {
+                id,
+                name,
+                config: _,
+            } => f
+                .debug_struct("UpdateTunnel")
+                .field("id", id)
+                .field("name", name)
+                .finish_non_exhaustive(),
+            other => match serde_json::to_string(other) {
+                Ok(json) => f.write_str(&json),
+                Err(_) => f.write_str("Request"),
+            },
+        }
+    }
 }
 
 /// Successful result of a [`Request`]; serialized as `{"type": ..., "data": ...}`.
@@ -307,5 +338,37 @@ impl TunnelInfo {
             full_tunnel: config.peers.iter().any(|p| p.is_default_route()),
             peers: config.peers.len(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // the configuration text, with its keys, is left out of the debug output
+    #[test]
+    fn request_debug_hides_the_config() {
+        let config = "[Interface]\nPrivateKey = c2VjcmV0\n".to_owned();
+        let import = Request::ImportTunnel {
+            name: "office".into(),
+            config: config.clone(),
+        };
+        let update = Request::UpdateTunnel {
+            id: "0123".into(),
+            name: "office".into(),
+            config,
+        };
+        for request in [import, update] {
+            let text = format!("{request:?}");
+            assert!(text.contains("office"));
+            assert!(!text.contains("PrivateKey") && !text.contains("c2VjcmV0"));
+        }
+    }
+
+    // requests without secrets are shown in full
+    #[test]
+    fn request_debug_shows_other_requests() {
+        let text = format!("{:?}", Request::Connect { id: "0123".into() });
+        assert!(text.contains("connect") && text.contains("0123"));
     }
 }
