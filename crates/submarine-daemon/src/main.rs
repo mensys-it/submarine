@@ -9,6 +9,7 @@
 //!                                                            run in the foreground
 //!   submarine-daemon reset-firewall                          remove kill switch rules
 //!   submarine-daemon access [all | only <user>...]           who may use the service
+//!   submarine-daemon pipe-proxy                              relay stdin/stdout to the service
 //!   submarine-daemon service install|uninstall|run           Windows service (Windows only)
 //!
 //! `--socket`, `--data-dir` and `--log-file` can also be set with SUBMARINE_SOCKET,
@@ -212,13 +213,23 @@ fn main() -> ExitCode {
             init_logging(None);
             access::command(&args[2..], &Config::from_args(&[]).data_dir)
         }
+        // relay for the CLI, which cannot open the Windows pipe itself (see `pipe_proxy`)
+        Some("pipe-proxy") => {
+            return match runtime().block_on(pipe_proxy()) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(err) => {
+                    eprintln!("cannot reach the Submarine service: {err}");
+                    ExitCode::FAILURE
+                }
+            };
+        }
         // Windows service management, handled entirely by `winsvc`
         #[cfg(windows)]
         Some("service") => return winsvc::command(args.get(2).map(String::as_str), &args),
         // usage
         Some("-h" | "--help") => {
             eprintln!(
-                "usage: {0} [--socket <path>] [--data-dir <path>] [--log-file <path>]\n       {0} reset-firewall\n       {0} access [all | only <user>...]",
+                "usage: {0} [--socket <path>] [--data-dir <path>] [--log-file <path>]\n       {0} reset-firewall\n       {0} access [all | only <user>...]\n       {0} pipe-proxy",
                 args[0]
             );
             #[cfg(windows)]
@@ -266,6 +277,35 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()>) -> std::io:
         () = shutdown => tracing::info!("shutting down"),
     }
     service.shutdown().await;
+    Ok(())
+}
+
+/// `submarine-daemon pipe-proxy`: connects to the service as the current user and
+/// relays stdin to it and its messages to stdout, after an empty line that tells
+/// the caller the connection is up.
+///
+/// The `submarine` CLI uses it on Windows: Node and Bun open a pipe asking for
+/// `GENERIC_WRITE`, which includes the right to create pipe instances that the
+/// pipe's ACL denies to users, and they cannot check who owns the pipe. The relay
+/// opens it like `submarine_ipc::Client` does.
+///
+/// # Errors
+/// Fails if the service cannot be reached or a copy fails.
+async fn pipe_proxy() -> std::io::Result<()> {
+    use interprocess::local_socket::traits::tokio::Stream as _;
+    use tokio::io::AsyncWriteExt;
+
+    let conn = submarine_ipc::connect(&submarine_ipc::socket_path()).await?;
+    let (mut from_service, mut to_service) = conn.split();
+    let mut stdout = tokio::io::stdout();
+    stdout.write_all(b"\n").await?;
+    stdout.flush().await?;
+    // the relay ends when either side closes
+    let mut stdin = tokio::io::stdin();
+    tokio::select! {
+        result = tokio::io::copy(&mut stdin, &mut to_service) => result?,
+        result = tokio::io::copy(&mut from_service, &mut stdout) => result?,
+    };
     Ok(())
 }
 

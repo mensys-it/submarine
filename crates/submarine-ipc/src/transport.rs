@@ -78,7 +78,7 @@ pub fn bind(path: &str) -> io::Result<Listener> {
 /// Connects to the daemon's socket.
 /// On Windows the pipe is opened by [`crate::winpipe`], which requests only the rights
 /// granted by the pipe ACL and refuses a pipe not created by the service.
-pub(crate) async fn connect(path: &str) -> io::Result<Connection> {
+pub async fn connect(path: &str) -> io::Result<Connection> {
     #[cfg(windows)]
     {
         use interprocess::os::windows::named_pipe::local_socket::tokio::Stream as PipeStream;

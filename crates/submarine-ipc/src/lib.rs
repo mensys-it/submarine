@@ -19,7 +19,7 @@ use submarine_config::TunnelConfig;
 
 pub use client::{Client, ClientError};
 pub use transport::{
-    Connection, Listener, MAX_MESSAGE_LEN, bind, read_message, socket_path, write_message,
+    Connection, Listener, MAX_MESSAGE_LEN, bind, connect, read_message, socket_path, write_message,
 };
 
 /// A command sent by a client; serialized as `{"method": ..., "params": ...}`.

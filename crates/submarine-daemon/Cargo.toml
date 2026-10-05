@@ -16,7 +16,7 @@ submarine-config = { version = "0.1.0", path = "../submarine-config" }
 submarine-ipc = { version = "0.1.0", path = "../submarine-ipc" }
 submarine-net = { version = "0.1.0", path = "../submarine-net" }
 submarine-tunnel = { version = "0.1.0", path = "../submarine-tunnel" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "fs", "io-std", "io-util"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }

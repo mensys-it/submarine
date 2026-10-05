@@ -2,14 +2,14 @@
 // the in-memory fake daemon (see fake-daemon.ts) on a temporary Unix socket.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import { findCommand, findTunnel, parseLine, type Session, UsageError } from "../src/commands.ts";
 import { formatAgo, formatBytes, formatDuration } from "../src/format.ts";
 import { plain } from "../src/lines.ts";
-import { DaemonClient, ServiceError, socketPath } from "../src/ipc.ts";
+import { DaemonClient, proxyCommand, ServiceError, socketPath } from "../src/ipc.ts";
 import { FakeDaemon } from "./fake-daemon.ts";
 
 let daemon: FakeDaemon;
@@ -27,6 +27,7 @@ beforeEach(async () => {
 afterEach(async () => {
   client.close();
   await daemon.stop();
+  delete process.env.SUBMARINE_SOCKET;
 });
 
 describe("ipc", () => {
@@ -52,6 +53,39 @@ describe("ipc", () => {
   // a missing socket is a ServiceError
   test("unreachable service", async () => {
     await expect(DaemonClient.connect(path.join(os.tmpdir(), "missing.sock"))).rejects.toBeInstanceOf(ServiceError);
+  });
+
+  // without submarine-daemon.exe next to the executable, the proxy comes from the PATH
+  test("proxy command", () => {
+    expect(proxyCommand(path.join(os.tmpdir(), "nowhere", "submarine.exe"))).toBe("submarine-daemon");
+  });
+
+  // a proxy that cannot be started is a ServiceError
+  test("missing pipe proxy", async () => {
+    await expect(DaemonClient.viaProxy(path.join(os.tmpdir(), "no-such-proxy"))).rejects.toBeInstanceOf(ServiceError);
+  });
+});
+
+// the daemon built by `cargo build`, used as the pipe proxy of the Windows client
+const builtDaemon = path.join(import.meta.dir, "../../../target/debug/submarine-daemon");
+
+describe.skipIf(!existsSync(builtDaemon))("pipe proxy", () => {
+  // requests, responses and events go through the proxy as through the socket
+  test("requests through the proxy", async () => {
+    process.env.SUBMARINE_SOCKET = daemon.path;
+    const proxied = await DaemonClient.viaProxy(builtDaemon);
+    const { data } = await proxied.request({ method: "list_tunnels" }, "tunnels");
+    expect(data).toHaveLength(2);
+    const event = new Promise((resolve) => proxied.once("event", resolve));
+    await proxied.request({ method: "disconnect" }, "ok");
+    expect(await event).toMatchObject({ type: "status_changed" });
+    proxied.close();
+  });
+
+  // the error of a proxy that cannot reach the service is shown to the user
+  test("proxy without a service", async () => {
+    process.env.SUBMARINE_SOCKET = path.join(os.tmpdir(), "missing.sock");
+    await expect(DaemonClient.viaProxy(builtDaemon)).rejects.toThrow("cannot reach the Submarine service");
   });
 });
 
