@@ -1,0 +1,31 @@
+# systemd unit of the Submarine service: runs submarine-daemon as root at boot,
+# with only the capabilities it needs.
+
+[Unit]
+Description=Submarine VPN service
+# started once the network is up
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/submarine-daemon
+# restart after a crash, so the kill switch is re-evaluated quickly
+Restart=on-failure
+RestartSec=2
+# needs to create TUN devices, change routes/rules/nftables and DNS
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+# data directory /var/lib/submarine (tunnels, settings, state), readable only by root
+StateDirectory=submarine
+StateDirectoryMode=0700
+# socket directory /run/submarine, kept across restarts so clients find the same path
+RuntimeDirectory=submarine
+RuntimeDirectoryPreserve=yes
+# hardening: no access to home directories, private /tmp, no privilege gain
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
