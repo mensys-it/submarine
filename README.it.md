@@ -146,8 +146,9 @@ scripts/windows/cargo.sh clippy -p submarine-daemon -- -D warnings   # solo cont
 
 Produce `Submarine_<versione>_x64-setup.exe`, che installa l'app, `submarine-daemon.exe` e
 `wintun.dll` in `Program Files\Submarine` e registra il servizio **Submarine** (avvio
-automatico, account LocalSystem, riavvio in caso di crash). La disinstallazione rimuove il
-servizio e le regole del kill switch.
+automatico, account LocalSystem, riavvio in caso di crash). Alla prima installazione chiede se
+Submarine può essere usato da tutti gli utenti o solo da quello attuale; gli aggiornamenti
+mantengono la scelta. La disinstallazione rimuove il servizio e le regole del kill switch.
 
 Senza installer, da un terminale **come amministratore**, con `wintun.dll` accanto
 all'eseguibile:
@@ -200,7 +201,8 @@ Su un Mac (Xcode command line tools, Rust, Node.js):
 
 ```sh
 scripts/macos/build.sh              # servizio, CLI e app (.app/.dmg)
-sudo packaging/macos/install.sh     # servizio launchd it.mensys.submarine.daemon
+sudo packaging/macos/install.sh     # servizio launchd it.mensys.submarine.daemon; chiede chi
+                                    # può usarlo (o --all-users / --only-me)
 sudo packaging/macos/uninstall.sh   # rimozione, incluse le regole del kill switch
 ```
 
