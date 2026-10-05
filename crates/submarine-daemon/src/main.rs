@@ -39,8 +39,7 @@ const SOCKET_GROUP: &str = "submarine";
 #[cfg(target_os = "macos")]
 const SOCKET_GROUP: &str = "staff";
 
-/// Size in bytes above which the log file is discarded at startup, so it cannot grow
-/// without bound.
+/// Size in bytes above which the log file is rotated, so it cannot grow without bound.
 const MAX_LOG_SIZE: u64 = 10 * 1024 * 1024;
 
 /// Runtime configuration of the daemon.
@@ -95,17 +94,8 @@ pub fn init_logging(file: Option<&Path>) {
 
     // level from RUST_LOG, `info` by default
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
-    // log file opened in append mode, discarded first when it is too large
-    let log_file = file.and_then(|path| {
-        if std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_LOG_SIZE) {
-            let _ = std::fs::remove_file(path);
-        }
-        std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .ok()
-    });
+    // log file opened in append mode, rotated when it grows too large
+    let log_file = file.and_then(|path| LogFile::open(path, MAX_LOG_SIZE).ok());
     // output layer: plain text to the file (no ANSI colors), or stderr
     let output = match log_file {
         Some(file) => tracing_subscriber::fmt::layer()
@@ -129,6 +119,67 @@ pub fn init_logging(file: Option<&Path>) {
         tracing::error!(thread = thread.name().unwrap_or("?"), "panic: {info}");
         default_hook(info);
     }));
+}
+
+/// Log file that is moved to `<name>.old`, replacing the previous one, and started
+/// again once it exceeds `max` bytes: at most twice that size is kept on disk, even
+/// when something keeps logging while the service runs.
+struct LogFile {
+    /// Path of the current file.
+    path: PathBuf,
+    file: std::fs::File,
+    /// Current size of the file.
+    size: u64,
+    /// Size above which the file is rotated.
+    max: u64,
+}
+
+impl LogFile {
+    /// Opens `path` for appending, creating it if missing.
+    fn open(path: &Path, max: u64) -> std::io::Result<Self> {
+        let file = Self::append(path)?;
+        let size = file.metadata()?.len();
+        Ok(Self {
+            path: path.to_owned(),
+            file,
+            size,
+            max,
+        })
+    }
+
+    /// Opens `path` for appending, creating it if missing.
+    fn append(path: &Path) -> std::io::Result<std::fs::File> {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+    }
+
+    /// Moves the file to `<name>.old` and starts a new one.
+    fn rotate(&mut self) -> std::io::Result<()> {
+        let mut old = self.path.clone().into_os_string();
+        old.push(".old");
+        std::fs::rename(&self.path, old)?;
+        self.file = Self::append(&self.path)?;
+        self.size = 0;
+        Ok(())
+    }
+}
+
+impl std::io::Write for LogFile {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        // a failed rotation only delays it: the line is still written
+        if self.size > self.max {
+            let _ = self.rotate();
+        }
+        let written = self.file.write(buf)?;
+        self.size += written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
 }
 
 /// Creates the multi-threaded tokio runtime.
@@ -273,4 +324,28 @@ async fn shutdown_signal() {
     }
     #[cfg(not(unix))]
     let _ = tokio::signal::ctrl_c().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use super::*;
+
+    // past the limit the file is moved to `.old` and a new one is started
+    #[test]
+    fn log_file_rotates() {
+        let dir = std::env::temp_dir().join(format!("submarine-log-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("daemon.log");
+        let mut log = LogFile::open(&path, 10).unwrap();
+        log.write_all(b"first line\n").unwrap();
+        log.write_all(b"second\n").unwrap();
+        log.write_all(b"third\n").unwrap();
+        // the first line exceeded the limit: the second one went to a new file
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "second\nthird\n");
+        let old = std::fs::read_to_string(dir.join("daemon.log.old")).unwrap();
+        assert_eq!(old, "first line\n");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

@@ -19,7 +19,7 @@ pub type Connection = interprocess::local_socket::tokio::Stream;
 pub type Listener = interprocess::local_socket::tokio::Listener;
 
 /// Upper bound for one message, so a misbehaving peer cannot exhaust memory.
-const MAX_MESSAGE_LEN: u64 = 1024 * 1024;
+pub const MAX_MESSAGE_LEN: u64 = 1024 * 1024;
 
 /// Socket path (Unix) or pipe name (Windows). `SUBMARINE_SOCKET` overrides it.
 pub fn socket_path() -> String {

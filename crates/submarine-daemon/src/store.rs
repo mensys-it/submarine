@@ -28,6 +28,9 @@ use crate::vault::Vault;
 
 /// Maximum length of a tunnel name, in characters.
 const MAX_NAME_LEN: usize = 64;
+/// Most tunnels that can be stored. With the limits of `submarine_config` on a single
+/// configuration, the summaries of all of them fit in one IPC message.
+const MAX_TUNNELS: usize = 32;
 
 /// Content of a tunnel file.
 #[derive(Serialize, Deserialize)]
@@ -184,8 +187,16 @@ impl TunnelStore {
     /// Stores a new tunnel and returns its id. The name is trimmed.
     ///
     /// # Errors
-    /// `InvalidInput` if the name is empty or longer than `MAX_NAME_LEN`.
+    /// `InvalidInput` if the name is empty or longer than `MAX_NAME_LEN`, or if
+    /// `MAX_TUNNELS` tunnels are already stored.
     pub fn insert(&self, name: &str, config: TunnelConfig) -> io::Result<String> {
+        // encrypted files, plus plain ones not encrypted yet
+        if self.ids("tunnel")?.len() + self.ids("json")?.len() >= MAX_TUNNELS {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("at most {MAX_TUNNELS} tunnels can be stored"),
+            ));
+        }
         let id = uuid::Uuid::new_v4().simple().to_string();
         self.write(&id, &stored(name, config)?)?;
         Ok(id)
@@ -324,6 +335,45 @@ mod tests {
 
     /// Minimal valid configuration with a full tunnel (`0.0.0.0/0`).
     const CONF: &str = "[Interface]\nPrivateKey = yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=\nAddress = 10.0.0.2/32\n[Peer]\nPublicKey = xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=\nAllowedIPs = 0.0.0.0/0\nEndpoint = 1.2.3.4:51820\n";
+
+    // the summaries of the most tunnels, each as large as the parser allows, fit in
+    // one IPC message
+    #[test]
+    fn largest_tunnel_list_fits_in_a_message() {
+        let name = "\u{1F30A}".repeat(MAX_NAME_LEN);
+        let long = format!("{}.example", "a".repeat(245));
+        let addresses = vec!["fd00:1111:2222:3333:4444:5555:6666:7777/128"; 16].join(", ");
+        let dns = vec![long.as_str(); 16].join(", ");
+        let mut text = format!(
+            "[Interface]\nPrivateKey = yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=\nAddress = {addresses}\nDNS = {dns}\n"
+        );
+        for _ in 0..64 {
+            text.push_str(&format!(
+                "[Peer]\nPublicKey = xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=\nAllowedIPs = 0.0.0.0/0\nEndpoint = {long}:65535\n"
+            ));
+        }
+        let config = submarine_config::parse(&text).unwrap().config;
+        let info = TunnelInfo::new("0".repeat(32), name, &config);
+        let message = submarine_ipc::ServerMessage::Response {
+            id: u64::MAX,
+            result: Ok(submarine_ipc::Response::Tunnels(vec![info; MAX_TUNNELS])),
+        };
+        let len = serde_json::to_vec(&message).unwrap().len() as u64;
+        assert!(len < submarine_ipc::MAX_MESSAGE_LEN, "{len} bytes");
+    }
+
+    // no tunnel is stored beyond the limit
+    #[test]
+    fn at_most_max_tunnels() {
+        let (store, dir) = temp_store();
+        let config = || submarine_config::parse(CONF).unwrap().config;
+        for i in 0..MAX_TUNNELS {
+            store.insert(&format!("t{i}"), config()).unwrap();
+        }
+        let err = store.insert("one more", config()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     /// Opens a store in a new temporary directory, returned for cleanup.
     fn temp_store() -> (TunnelStore, PathBuf) {

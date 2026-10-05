@@ -175,7 +175,7 @@ executable:
   `ProgramData\Submarine` folder is accessible only to SYSTEM and Administrators; one
   created by another user before the service is moved aside and replaced.
 - Stored tunnels encrypted with a key protected by DPAPI, bound to the computer.
-- Service log in `ProgramData\Submarine\daemon.log`.
+- Service log in `ProgramData\Submarine\daemon.log`, moved to `daemon.log.old` past 10 MB.
 - Per-app tunnel: kernel driver in `third_party/win-split-tunnel` (fork of the Mullvad
   driver), built and test-signed by GitHub Actions on a hosted Windows runner. If
   `dist/driver/submarine-split-tunnel.sys` exists, `build-windows.sh` includes it in the

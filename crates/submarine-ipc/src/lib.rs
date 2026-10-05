@@ -18,7 +18,9 @@ use serde::{Deserialize, Serialize};
 use submarine_config::TunnelConfig;
 
 pub use client::{Client, ClientError};
-pub use transport::{Connection, Listener, bind, read_message, socket_path, write_message};
+pub use transport::{
+    Connection, Listener, MAX_MESSAGE_LEN, bind, read_message, socket_path, write_message,
+};
 
 /// A command sent by a client; serialized as `{"method": ..., "params": ...}`.
 /// Its `Debug` output leaves out the configuration text, see the impl below.

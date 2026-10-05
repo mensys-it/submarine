@@ -176,7 +176,8 @@ all'eseguibile:
   La cartella `ProgramData\Submarine` è accessibile solo a SYSTEM e Administrators; se un
   altro utente la crea prima del servizio, viene spostata da parte e sostituita.
 - Tunnel salvati cifrati con una chiave protetta da DPAPI, legata al computer.
-- Log del servizio in `ProgramData\Submarine\daemon.log`.
+- Log del servizio in `ProgramData\Submarine\daemon.log`, spostato in `daemon.log.old` oltre i
+  10 MB.
 - Tunnel per app: driver kernel in `third_party/win-split-tunnel` (fork del driver di Mullvad),
   compilato e firmato in modalità test da GitHub Actions su un runner Windows ospitato. Se
   `dist/driver/submarine-split-tunnel.sys` esiste, `build-windows.sh` lo include
