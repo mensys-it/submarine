@@ -5,13 +5,14 @@
 //! socket permissions and the main loop that runs the service until shutdown.
 //!
 //! Usage:
-//!   submarine-daemon [--socket <path>] [--data-dir <path>]   run in the foreground
+//!   submarine-daemon [--socket <path>] [--data-dir <path>] [--log-file <path>]
+//!                                                            run in the foreground
 //!   submarine-daemon reset-firewall                          remove kill switch rules
 //!   submarine-daemon access [all | only <user>...]           who may use the service
 //!   submarine-daemon service install|uninstall|run           Windows service (Windows only)
 //!
-//! `--socket` and `--data-dir` can also be set with SUBMARINE_SOCKET and
-//! SUBMARINE_DATA_DIR.
+//! `--socket`, `--data-dir` and `--log-file` can also be set with SUBMARINE_SOCKET,
+//! SUBMARINE_DATA_DIR and SUBMARINE_LOG_FILE.
 
 mod access;
 mod datadir;
@@ -48,12 +49,15 @@ pub struct Config {
     pub socket: String,
     /// Directory holding tunnels, settings and state.
     pub data_dir: PathBuf,
+    /// File the foreground daemon logs to, rotated like the one of the Windows
+    /// service; stderr when absent. Used by the macOS launchd job.
+    pub log_file: Option<PathBuf>,
 }
 
 impl Config {
     /// Builds the configuration from the command line, falling back to the
-    /// `SUBMARINE_SOCKET` / `SUBMARINE_DATA_DIR` environment variables and then
-    /// to the platform defaults.
+    /// `SUBMARINE_SOCKET` / `SUBMARINE_DATA_DIR` / `SUBMARINE_LOG_FILE` environment
+    /// variables and then to the platform defaults.
     fn from_args(args: &[String]) -> Self {
         // value following `flag` on the command line, otherwise the `env` variable
         let option = |flag: &str, env: &str| {
@@ -68,6 +72,7 @@ impl Config {
             data_dir: option("--data-dir", "SUBMARINE_DATA_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(default_data_dir),
+            log_file: option("--log-file", "SUBMARINE_LOG_FILE").map(PathBuf::from),
         }
     }
 }
@@ -213,7 +218,7 @@ fn main() -> ExitCode {
         // usage
         Some("-h" | "--help") => {
             eprintln!(
-                "usage: {0} [--socket <path>] [--data-dir <path>]\n       {0} reset-firewall\n       {0} access [all | only <user>...]",
+                "usage: {0} [--socket <path>] [--data-dir <path>] [--log-file <path>]\n       {0} reset-firewall\n       {0} access [all | only <user>...]",
                 args[0]
             );
             #[cfg(windows)]
@@ -222,8 +227,9 @@ fn main() -> ExitCode {
         }
         // default: daemon in the foreground until SIGTERM / Ctrl+C
         _ => {
-            init_logging(None);
-            runtime().block_on(run(Config::from_args(&args), shutdown_signal()))
+            let config = Config::from_args(&args);
+            init_logging(config.log_file.as_deref());
+            runtime().block_on(run(config, shutdown_signal()))
         }
     };
     match result {

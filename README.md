@@ -219,7 +219,7 @@ sudo packaging/macos/uninstall.sh   # removal, kill switch rules included
 - The service socket is accessible to the `staff` group, that is to local users;
   `submarine-daemon access only <user>` restricts it to some of them.
 - Stored tunnels encrypted with a key kept in the System keychain.
-- Log in `/var/log/submarine-daemon.log`.
+- Log in `/var/log/submarine-daemon.log`, moved to `submarine-daemon.log.old` past 10 MB.
 
 </details>
 

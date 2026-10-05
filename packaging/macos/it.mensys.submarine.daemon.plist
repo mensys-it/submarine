@@ -8,17 +8,21 @@
 <dict>
     <key>Label</key>
     <string>it.mensys.submarine.daemon</string>
+    <!-- the daemon writes and rotates its own log: launchd would keep the file open
+         and defeat the rotation -->
     <key>ProgramArguments</key>
     <array>
         <string>/Library/PrivilegedHelperTools/submarine-daemon</string>
+        <string>--log-file</string>
+        <string>/var/log/submarine-daemon.log</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <!-- restarted after a crash, so the kill switch is re-evaluated quickly -->
     <key>KeepAlive</key>
     <true/>
-    <!-- the daemon logs to stderr when it runs in the foreground -->
+    <!-- only what is printed before the log is opened, e.g. a bad option -->
     <key>StandardErrorPath</key>
-    <string>/var/log/submarine-daemon.log</string>
+    <string>/var/log/submarine-daemon.stderr.log</string>
 </dict>
 </plist>

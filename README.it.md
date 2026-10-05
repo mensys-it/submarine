@@ -221,7 +221,7 @@ sudo packaging/macos/uninstall.sh   # rimozione, incluse le regole del kill swit
 - Il socket del servizio è accessibile al gruppo `staff`, cioè agli utenti locali;
   `submarine-daemon access only <utente>` lo limita ad alcuni di loro.
 - Tunnel salvati cifrati con una chiave conservata nel System keychain.
-- Log in `/var/log/submarine-daemon.log`.
+- Log in `/var/log/submarine-daemon.log`, spostato in `submarine-daemon.log.old` oltre i 10 MB.
 
 </details>
 
